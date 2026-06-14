@@ -1,0 +1,40 @@
+{
+  "name": "tasteprint",
+  "version": "0.1.0",
+  "description": "Local onboarding tool that generates project-specific DESIGN.md and SKILL.md files for AI coding agents.",
+  "type": "module",
+  "bin": {
+    "tasteprint": "./bin/tasteprint.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "DESIGN.md",
+    "TASTEPRINT-GUIDE.md",
+    "THIRD_PARTY_NOTICES.md",
+    "awesome-design-md/LICENSE",
+    "awesome-design-md/design-md/*/DESIGN.md",
+    "awesome-design-md/design-md/*/README.md",
+    "awesome-design-skills/LICENSE",
+    "awesome-design-skills/skills/*/SKILL.md",
+    "awesome-design-skills/skills/*/DESIGN.md"
+  ],
+  "scripts": {
+    "start": "node ./bin/tasteprint.js --no-open",
+    "dev": "node ./bin/tasteprint.js --no-open --port 4317",
+    "dev:local": "node ./bin/tasteprint.js --no-open --port 4317 --local-only",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "design.md",
+    "skill.md",
+    "ai",
+    "design-system",
+    "onboarding"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

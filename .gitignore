@@ -1,0 +1,32 @@
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Tasteprint temporary files
+.tasteprint/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# User-specified ignored files
+*DESIGN-copy*
+*SKILL-copy*
+DESIGN.md
+design.md
+SKILL.md
+skill.md
+TASTEPRINT-GUIDE.md
+tasteprint-guide.md
+TASTEPRINT-UPGRADE-PLAN.md
+tasteprint-upgrade-plan.md
+THIRD_PARTY_NOTICES.md
+third_party_notices.md
+awesome-design.md
+awesome-design-md/
+awesome-design-skills/
+Google/
+google/
