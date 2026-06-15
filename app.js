@@ -1,7 +1,7 @@
 import { applyTheme, BASE_THEME, buildTheme } from "./theme.js";
 import { ensureContrast, contrastRatio, mixHex } from "./color.js";
 import { archetypeForGroup, brandForReference, MOOD_THEMES } from "./themes.db.js";
-import { syncModelEffects, destroyModelEffects } from "./modelEffects.js";
+import { syncModelEffectsDeferred, destroyModelEffects } from "./modelEffects.js";
 
 const app = document.querySelector("#app");
 
@@ -466,10 +466,13 @@ function updateModelSplit() {
   root.setProperty("--sl", primary.ink);
   root.setProperty("--sr", secondary.ink);
 
+  modelSplitBg.querySelector(".atmos-primary")?.setAttribute("data-effect", primary.effect);
+  modelSplitBg.querySelector(".atmos-secondary")?.setAttribute("data-effect", merged ? "none" : secondary.effect);
+
   // EFFECT world: mount / crossfade each side's canvas effect into its .fx-stage. The
   // colour above rides typed CSS vars; this hands the per-side effect + merge state to
   // the controller manager (which destroys the secondary effect when the worlds merge).
-  syncModelEffects(modelSplitBg, {
+  syncModelEffectsDeferred(modelSplitBg, {
     primary: primary.effect,
     secondary: secondary.effect,
     merged

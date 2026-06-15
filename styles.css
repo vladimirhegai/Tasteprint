@@ -618,6 +618,23 @@ button {
   will-change: transform;
 }
 
+:root[data-screen="models"] .atmos[data-effect="metaballs"] .atmos-flow {
+  opacity: 0.34;
+}
+
+:root[data-screen="models"] .atmos[data-effect="metaballs"] .atmos-blob {
+  filter: blur(28px);
+  opacity: 0.16;
+}
+
+:root[data-screen="models"] .atmos[data-effect="faulty-terminal"] .atmos-flow {
+  opacity: 0.38;
+}
+
+:root[data-screen="models"] .atmos[data-effect="faulty-terminal"] .atmos-blob {
+  opacity: 0.24;
+}
+
 .atmos-primary .blob-a {
   width: 48vw;
   height: 48vw;
@@ -682,6 +699,7 @@ button {
   position: absolute;
   inset: 0;
   opacity: 0;
+  contain: paint;
   transition: opacity 600ms var(--ease);
 }
 
@@ -2248,6 +2266,10 @@ button {
     padding-inline: 20px;
   }
 
+  :root[data-screen="models"] .bottom-bar {
+    position: static;
+  }
+
   .brand {
     order: 2;
     text-align: center;
@@ -2279,7 +2301,9 @@ button {
     gap: 20px;
   }
 
-  .model-card-wrap {
+  .model-card-wrap,
+  .model-card-wrap.primary,
+  .model-card-wrap.secondary {
     position: static;
     width: 100%;
     /* Stacked vertically on small screens — drop the diagonal float so the cards
