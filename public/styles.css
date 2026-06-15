@@ -665,105 +665,53 @@ button {
 }
 
 /* ---- Per-model signature effects (COLOR + EFFECT split) ----
-   All three effect layers are always in the DOM; data-effect on the .atmos decides
-   which one is opaque. Because each layer carries its own opacity transition, a model
-   swap CROSSFADES the effect (outgoing fades out, incoming fades in) instead of a
-   hard cut. Effect is keyed independently of palette. */
-.fx {
+   The colour world above is pure CSS (typed custom-property crossfades). The EFFECT
+   world is canvas, mounted + crossfaded by public/modelEffects.js into one .fx-stage
+   per side. Each effect renders into a .fx-instance that fades in/out, so a model swap
+   crossfades the motion instead of hard-cutting. Canvases never take pointer events and
+   always sit behind the cards (.model-atmos is z-index:-1). */
+.fx-stage {
   position: absolute;
-  inset: -12%;
-  opacity: 0;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
   pointer-events: none;
+}
+
+.fx-instance {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
   transition: opacity 600ms var(--ease);
 }
 
-.fx-bubbles {
-  inset: 0;
-  overflow: hidden;
+.fx-instance.is-active {
+  opacity: var(--fx-opacity, 1);
 }
 
-/* Codex — grid: a faint structural baseline grid, drifting like it is being
-   measured. Masked so it fades toward the field edges. */
-.atmos[data-effect="grid"] .fx-grid {
-  opacity: 0.6;
-  --code-line: color-mix(in srgb, var(--atmos-ink) 7%, transparent);
-  background-image:
-    linear-gradient(var(--code-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--code-line) 1px, transparent 1px);
-  background-size: 46px 46px;
-  -webkit-mask-image: radial-gradient(130% 110% at 22% 12%, #000, transparent 72%);
-  mask-image: radial-gradient(130% 110% at 22% 12%, #000, transparent 72%);
-  animation: grid-drift 42s linear infinite;
+.fx-instance canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.atmos-secondary[data-effect="grid"] .fx-grid {
-  -webkit-mask-image: radial-gradient(130% 110% at 80% 86%, #000, transparent 72%);
-  mask-image: radial-gradient(130% 110% at 80% 86%, #000, transparent 72%);
-}
-
-@keyframes grid-drift {
-  from { transform: translate3d(0, 0, 0); }
-  to { transform: translate3d(46px, 46px, 0); }
-}
-
-/* Gemini — dots: a drifting dot cloud, ideas suspended in air. */
-.atmos[data-effect="dots"] .fx-dots {
-  opacity: 0.7;
-  background-image: radial-gradient(circle, color-mix(in srgb, var(--atmos-ink) 24%, transparent) 1.1px, transparent 1.7px);
-  background-size: 32px 32px;
-  animation: dot-float 24s ease-in-out infinite alternate;
-}
-
-@keyframes dot-float {
-  from { transform: translate3d(0, 0, 0); }
-  to { transform: translate3d(14px, -22px, 0); }
-}
-
-/* Claude — bubbles: soft tinted circles that rise, drift, and gently scale. Replaces
-   the old paper-grain (feTurbulence) texture. To actually read on the warm field (the
-   bloom tints alone were ~1.1:1 against it), each bubble carries a bright highlight, a
-   translucent body, and a defined clay rim in the world's accent (~2.4:1) — a real
-   soap-bubble edge, not a faint blob. Few and slow: a quiet gathering of thoughts. */
-.atmos[data-effect="bubbles"] .fx-bubbles {
-  opacity: 1;
-}
-
-/* Keep each side's bubbles inside its own diagonal half so they never drift into the
-   neighbouring model's territory. The secondary layer is already masked to the
-   bottom-right; give the primary the complementary top-left mask. When BOTH sides are
-   Claude the two masked halves meet and the bubbles fill the whole field. */
-.atmos-primary .fx-bubbles {
+/* Each side's effect is clipped to its own diagonal half. The secondary .atmos is
+   already masked to the bottom-right (its background feather), which also clips the
+   canvas inside it; the primary needs the complementary top-left mask here. When the
+   worlds merge, the primary effect fills the viewport and the secondary is hidden —
+   its controller is also destroyed in JS so no work happens off-screen. */
+.atmos-primary .fx-stage {
   -webkit-mask-image: linear-gradient(138deg, #000 41%, transparent 59%);
   mask-image: linear-gradient(138deg, #000 41%, transparent 59%);
 }
 
-.bubble {
-  position: absolute;
-  left: var(--left);
-  top: var(--top);
-  width: var(--size);
-  height: var(--size);
-  border-radius: 50%;
-  filter: blur(1.5px);
-  opacity: 0;
-  will-change: transform, opacity;
-  background:
-    radial-gradient(circle at 33% 28%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 42%),
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--atmos-bloom-1) 50%, transparent), color-mix(in srgb, var(--atmos-bloom-2) 28%, transparent) 70%, transparent 78%);
-  box-shadow:
-    inset 0 0 0 1.5px color-mix(in srgb, var(--atmos-accent) 40%, transparent),
-    inset 7px -9px 16px color-mix(in srgb, var(--atmos-accent) 18%, transparent);
-  animation: bubble-float var(--dur, 18s) ease-in-out var(--delay, 0s) infinite;
+:root[data-merged="true"] .atmos-primary .fx-stage {
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
-/* Each bubble is placed anywhere in its section (top/left) and gently bobs, breathes,
-   and drifts upward in place — so they populate the whole field instead of all rising
-   from the floor. Opacity breathes but never hits 0, so the gathering stays present
-   (and never blinks out in a fixed spot). Per-bubble --dx/--dy vary the drift. */
-@keyframes bubble-float {
-  0%   { transform: translate3d(0, 0, 0) scale(0.95); opacity: 0.6; }
-  50%  { transform: translate3d(var(--dx, 8px), var(--dy, -20px), 0) scale(1.06); opacity: 0.85; }
-  100% { transform: translate3d(0, 0, 0) scale(0.95); opacity: 0.6; }
+:root[data-merged="true"] .atmos-secondary .fx-stage {
+  opacity: 0;
 }
 
 /* The seam: a soft fold of light along the diagonal. Low opacity, no geometry —
@@ -2275,21 +2223,15 @@ button {
     transform: none !important;
   }
 
-  /* Freeze every ambient model-screen loop to a static frame: no float, no flowing
-     gradient, no bloom drift, no grid/dot drift, no rising bubbles. Only crossfades. */
+  /* Freeze the ambient CSS model-screen loops to a static frame: no card float, no
+     flowing gradient, no bloom drift. The canvas effects handle reduced motion in JS —
+     each renders a single static frame and runs no RAF loop. */
   .atmos-flow,
   .atmos-blob,
-  .fx-grid,
-  .fx-dots,
-  .bubble,
   .model-card-wrap.primary,
   .model-card-wrap.secondary {
     animation: none !important;
     transform: none !important;
-  }
-
-  .bubble {
-    opacity: 0.42;
   }
 }
 
@@ -2343,6 +2285,11 @@ button {
     /* Stacked vertically on small screens — drop the diagonal float so the cards
        don't drift into each other. */
     animation: none;
+  }
+
+  /* Quieter effects behind stacked cards (counts + DPR are also reduced in JS). */
+  .fx-instance.is-active {
+    opacity: calc(var(--fx-opacity, 1) * 0.8);
   }
 }
 
