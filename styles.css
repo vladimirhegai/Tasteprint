@@ -39,10 +39,53 @@
   --radius-pill: 9999px;
   --shadow-soft: 0 1px 2px rgba(15, 15, 18, 0.04), 0 18px 54px rgba(15, 15, 18, 0.08);
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  /* A stronger ease-out for tactile UI moments (CTA press, anatomy reveal) — more
+     immediate snap than --ease, no slow start. Emil's curve, not a default. */
+  --ease-out-soft: cubic-bezier(0.23, 1, 0.32, 1);
 
   font-family: var(--font-sans);
   color: var(--ink);
   background: var(--canvas);
+}
+
+/* Registered so the model-screen atmospheres can crossfade. CSS only animates
+   custom properties that are typed via @property — these carry each world's field
+   wash, drifting blooms, card, ink, hairline, and accent colours smoothly from one
+   model to the next when a dropdown changes. */
+@property --p-side { syntax: "<color>"; inherits: true; initial-value: #f1efea; }
+@property --s-side { syntax: "<color>"; inherits: true; initial-value: #f1efea; }
+@property --p-field-1 { syntax: "<color>"; inherits: true; initial-value: #f4f2ee; }
+@property --p-field-2 { syntax: "<color>"; inherits: true; initial-value: #e8e5de; }
+@property --p-bloom-1 { syntax: "<color>"; inherits: true; initial-value: #e9e6de; }
+@property --p-bloom-2 { syntax: "<color>"; inherits: true; initial-value: #f1efea; }
+@property --s-field-1 { syntax: "<color>"; inherits: true; initial-value: #f4f2ee; }
+@property --s-field-2 { syntax: "<color>"; inherits: true; initial-value: #e8e5de; }
+@property --s-bloom-1 { syntax: "<color>"; inherits: true; initial-value: #e9e6de; }
+@property --s-bloom-2 { syntax: "<color>"; inherits: true; initial-value: #f1efea; }
+@property --p-card { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --p-ink { syntax: "<color>"; inherits: true; initial-value: #151517; }
+@property --p-ink-muted { syntax: "<color>"; inherits: true; initial-value: #6d7078; }
+@property --p-hairline { syntax: "<color>"; inherits: true; initial-value: #e1e1dd; }
+@property --p-accent { syntax: "<color>"; inherits: true; initial-value: #5e6ad2; }
+@property --p-glow { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --s-card { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+@property --s-ink { syntax: "<color>"; inherits: true; initial-value: #151517; }
+@property --s-ink-muted { syntax: "<color>"; inherits: true; initial-value: #6d7078; }
+@property --s-hairline { syntax: "<color>"; inherits: true; initial-value: #e1e1dd; }
+@property --s-accent { syntax: "<color>"; inherits: true; initial-value: #5e6ad2; }
+@property --s-glow { syntax: "<color>"; inherits: true; initial-value: transparent; }
+
+:root {
+  transition:
+    --p-side 600ms var(--ease), --s-side 600ms var(--ease),
+    --p-field-1 600ms var(--ease), --p-field-2 600ms var(--ease),
+    --p-bloom-1 600ms var(--ease), --p-bloom-2 600ms var(--ease),
+    --s-field-1 600ms var(--ease), --s-field-2 600ms var(--ease),
+    --s-bloom-1 600ms var(--ease), --s-bloom-2 600ms var(--ease),
+    --p-card 600ms var(--ease), --p-ink 600ms var(--ease), --p-ink-muted 600ms var(--ease),
+    --p-hairline 600ms var(--ease), --p-accent 600ms var(--ease), --p-glow 600ms var(--ease),
+    --s-card 600ms var(--ease), --s-ink 600ms var(--ease), --s-ink-muted 600ms var(--ease),
+    --s-hairline 600ms var(--ease), --s-accent 600ms var(--ease), --s-glow 600ms var(--ease);
 }
 
 * {
@@ -213,6 +256,35 @@ button {
   letter-spacing: var(--heading-tracking);
 }
 
+.screen.centered .title {
+  text-align: center;
+}
+
+/* Centered screens compose as one title block: eyebrow, headline, supporting line
+   all share the same axis, and the supporting line is held to an editorial measure. */
+.screen.centered .eyebrow {
+  text-align: center;
+}
+
+.screen.centered .helper {
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+/* The model screen is the hero decision of phase one, so its headline runs larger
+   and tighter than the standard question title. */
+.screen.centered {
+  padding-top: 40px;
+}
+
+.screen.centered .title {
+  font-size: clamp(32px, 4vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
 .helper {
   margin: 14px 0 0;
   color: var(--ink-muted);
@@ -227,6 +299,12 @@ button {
 
 .body {
   margin-top: calc(28px * var(--density));
+}
+
+/* Breathing room between the centered title block and the staged cards — kept
+   measured so the whole composition clears the sticky footer on a laptop. */
+.body.model-body {
+  margin-top: calc(32px * var(--density));
 }
 
 /* ---------- Bottom bar + wordmark ---------- */
@@ -263,6 +341,36 @@ button {
   gap: 10px;
   color: var(--ink-muted);
   font-size: 13px;
+}
+
+.footer-note {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Bottom utility rail reads as one settled unit: "Tasteprint · npx tasteprint",
+   tinted to the primary world so it belongs to the atmosphere rather than floating
+   over it. The top eyebrow carries the step, so the rail stays calm. */
+:root[data-screen="models"] .brand {
+  font-size: 14px;
+}
+
+:root[data-screen="models"] .footer-side {
+  color: color-mix(in srgb, var(--p-ink) 56%, transparent);
+}
+
+:root[data-screen="models"] .footer-note {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  color: color-mix(in srgb, var(--p-ink) 52%, transparent);
+}
+
+:root[data-screen="models"] .footer-note::before {
+  content: "·";
+  margin-right: 9px;
+  color: color-mix(in srgb, var(--p-ink) 38%, transparent);
+  font-family: var(--font-sans);
 }
 
 .counter-chip {
@@ -393,53 +501,636 @@ button {
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--primary) 14%, transparent);
 }
 
-/* ---------- Model screen ---------- */
-.model-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+/* ---------- Model screen (cinematic diagonal split) ---------- */
+
+/* On the model screen the colored backdrop owns the page, so the default white
+   canvas surfaces step aside. */
+:root[data-screen="models"] body {
+  background: transparent;
 }
 
-.model-panel {
+:root[data-screen="models"] .bottom-bar {
+  background: linear-gradient(to top, color-mix(in srgb, var(--p-side) 55%, transparent), transparent);
+}
+
+:root[data-screen="models"] .progress-fill {
+  background: var(--p-accent);
+}
+
+:root[data-screen="models"] .progress-track {
+  background: color-mix(in srgb, var(--p-ink) 12%, transparent);
+}
+
+:root[data-screen="models"] .section-label {
+  color: var(--p-ink-muted);
+}
+
+/* ---- Living atmosphere ----
+   Two soft fields meet on a feathered diagonal. The primary world fills the whole
+   viewport; the secondary blends in from the bottom-right through a masked band, so
+   there is no hard edge — just two paper fields easing into one another. Each field
+   carries slow-drifting blooms and a signature texture. When both models match the
+   colours equalise and the seam fades to nothing. */
+.model-atmos {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  opacity: 0;
+  overflow: hidden;
+  transition: opacity 600ms var(--ease);
+}
+
+.model-atmos.is-on {
+  opacity: 1;
+}
+
+.atmos {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* Local aliases so blob + texture rules can stay side-agnostic. */
+.atmos-primary {
+  --atmos-ink: var(--p-ink);
+  --atmos-accent: var(--p-accent);
+  --atmos-bloom-1: var(--p-bloom-1);
+  --atmos-bloom-2: var(--p-bloom-2);
+  background:
+    radial-gradient(135% 110% at 16% 6%, var(--p-field-1), transparent 62%),
+    linear-gradient(146deg, var(--p-field-1), var(--p-field-2));
+}
+
+.atmos-secondary {
+  --atmos-ink: var(--s-ink);
+  --atmos-accent: var(--s-accent);
+  --atmos-bloom-1: var(--s-bloom-1);
+  --atmos-bloom-2: var(--s-bloom-2);
+  background:
+    radial-gradient(135% 110% at 84% 94%, var(--s-field-1), transparent 62%),
+    linear-gradient(146deg, var(--s-field-1), var(--s-field-2));
+  /* Feather the secondary in across the diagonal — a wide soft band, not a line. */
+  -webkit-mask-image: linear-gradient(138deg, transparent 41%, #000 59%);
+  mask-image: linear-gradient(138deg, transparent 41%, #000 59%);
+}
+
+/* ---- Flowing-water base ----
+   A large, low-contrast gradient sheet sitting under the blooms that slowly drifts,
+   rotates, and breathes — giving the field a liquid shimmer without ever animating
+   background-position (transform only, GPU). Each side runs its own slow cadence so
+   the two halves never pulse in sync. */
+.atmos-flow {
+  position: absolute;
+  inset: -45%;
+  opacity: 0.62;
+  will-change: transform;
+  background:
+    radial-gradient(38% 38% at 28% 30%, color-mix(in srgb, var(--atmos-bloom-1) 66%, transparent), transparent 66%),
+    radial-gradient(44% 44% at 72% 60%, color-mix(in srgb, var(--atmos-bloom-2) 58%, transparent), transparent 70%),
+    radial-gradient(30% 30% at 54% 86%, color-mix(in srgb, var(--atmos-bloom-1) 44%, transparent), transparent 72%);
+  animation: atmos-flow-a 30s ease-in-out infinite alternate;
+}
+
+.atmos-secondary .atmos-flow {
+  animation: atmos-flow-b 36s ease-in-out infinite alternate;
+}
+
+@keyframes atmos-flow-a {
+  0%   { transform: translate3d(-7%, -4%, 0) rotate(-6deg) scale(1.06); }
+  50%  { transform: translate3d(2%, 5%, 0) rotate(3deg) scale(1.16); }
+  100% { transform: translate3d(7%, 3%, 0) rotate(7deg) scale(1.1); }
+}
+
+@keyframes atmos-flow-b {
+  0%   { transform: translate3d(7%, 4%, 0) rotate(5deg) scale(1.12); }
+  50%  { transform: translate3d(-3%, -5%, 0) rotate(-4deg) scale(1.04); }
+  100% { transform: translate3d(-7%, -3%, 0) rotate(-7deg) scale(1.14); }
+}
+
+/* Drifting blooms: the "alive" part. Large, soft, slow — they breathe and wander
+   so the field never feels like a static gradient. Tones ride typed vars so they
+   crossfade with the model. */
+.atmos-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(44px);
+  opacity: 0.55;
+  will-change: transform;
+}
+
+.atmos-primary .blob-a {
+  width: 48vw;
+  height: 48vw;
+  left: -8vw;
+  top: -10vh;
+  background: radial-gradient(circle, var(--atmos-bloom-1), transparent 68%);
+  animation: bloom-drift-a 27s var(--ease) infinite alternate;
+}
+
+.atmos-primary .blob-b {
+  width: 34vw;
+  height: 34vw;
+  left: 18vw;
+  top: 24vh;
+  background: radial-gradient(circle, var(--atmos-bloom-2), transparent 70%);
+  animation: bloom-drift-b 34s var(--ease) infinite alternate;
+}
+
+.atmos-secondary .blob-a {
+  width: 46vw;
+  height: 46vw;
+  right: -8vw;
+  bottom: -10vh;
+  background: radial-gradient(circle, var(--atmos-bloom-1), transparent 68%);
+  animation: bloom-drift-b 30s var(--ease) infinite alternate;
+}
+
+.atmos-secondary .blob-b {
+  width: 32vw;
+  height: 32vw;
+  right: 16vw;
+  bottom: 22vh;
+  background: radial-gradient(circle, var(--atmos-bloom-2), transparent 70%);
+  animation: bloom-drift-a 37s var(--ease) infinite alternate;
+}
+
+@keyframes bloom-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(5vw, 4vh, 0) scale(1.14); }
+}
+
+@keyframes bloom-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.06); }
+  to { transform: translate3d(-4vw, -3vh, 0) scale(0.94); }
+}
+
+/* ---- Per-model signature effects (COLOR + EFFECT split) ----
+   All three effect layers are always in the DOM; data-effect on the .atmos decides
+   which one is opaque. Because each layer carries its own opacity transition, a model
+   swap CROSSFADES the effect (outgoing fades out, incoming fades in) instead of a
+   hard cut. Effect is keyed independently of palette. */
+.fx {
+  position: absolute;
+  inset: -12%;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 600ms var(--ease);
+}
+
+.fx-bubbles {
+  inset: 0;
+  overflow: hidden;
+}
+
+/* Codex — grid: a faint structural baseline grid, drifting like it is being
+   measured. Masked so it fades toward the field edges. */
+.atmos[data-effect="grid"] .fx-grid {
+  opacity: 0.6;
+  --code-line: color-mix(in srgb, var(--atmos-ink) 7%, transparent);
+  background-image:
+    linear-gradient(var(--code-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--code-line) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(130% 110% at 22% 12%, #000, transparent 72%);
+  mask-image: radial-gradient(130% 110% at 22% 12%, #000, transparent 72%);
+  animation: grid-drift 42s linear infinite;
+}
+
+.atmos-secondary[data-effect="grid"] .fx-grid {
+  -webkit-mask-image: radial-gradient(130% 110% at 80% 86%, #000, transparent 72%);
+  mask-image: radial-gradient(130% 110% at 80% 86%, #000, transparent 72%);
+}
+
+@keyframes grid-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(46px, 46px, 0); }
+}
+
+/* Gemini — dots: a drifting dot cloud, ideas suspended in air. */
+.atmos[data-effect="dots"] .fx-dots {
+  opacity: 0.7;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--atmos-ink) 24%, transparent) 1.1px, transparent 1.7px);
+  background-size: 32px 32px;
+  animation: dot-float 24s ease-in-out infinite alternate;
+}
+
+@keyframes dot-float {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(14px, -22px, 0); }
+}
+
+/* Claude — bubbles: soft tinted circles that rise, drift, and gently scale. Replaces
+   the old paper-grain (feTurbulence) texture. To actually read on the warm field (the
+   bloom tints alone were ~1.1:1 against it), each bubble carries a bright highlight, a
+   translucent body, and a defined clay rim in the world's accent (~2.4:1) — a real
+   soap-bubble edge, not a faint blob. Few and slow: a quiet gathering of thoughts. */
+.atmos[data-effect="bubbles"] .fx-bubbles {
+  opacity: 1;
+}
+
+/* Keep each side's bubbles inside its own diagonal half so they never drift into the
+   neighbouring model's territory. The secondary layer is already masked to the
+   bottom-right; give the primary the complementary top-left mask. When BOTH sides are
+   Claude the two masked halves meet and the bubbles fill the whole field. */
+.atmos-primary .fx-bubbles {
+  -webkit-mask-image: linear-gradient(138deg, #000 41%, transparent 59%);
+  mask-image: linear-gradient(138deg, #000 41%, transparent 59%);
+}
+
+.bubble {
+  position: absolute;
+  left: var(--left);
+  top: var(--top);
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  filter: blur(1.5px);
+  opacity: 0;
+  will-change: transform, opacity;
+  background:
+    radial-gradient(circle at 33% 28%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 42%),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--atmos-bloom-1) 50%, transparent), color-mix(in srgb, var(--atmos-bloom-2) 28%, transparent) 70%, transparent 78%);
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--atmos-accent) 40%, transparent),
+    inset 7px -9px 16px color-mix(in srgb, var(--atmos-accent) 18%, transparent);
+  animation: bubble-float var(--dur, 18s) ease-in-out var(--delay, 0s) infinite;
+}
+
+/* Each bubble is placed anywhere in its section (top/left) and gently bobs, breathes,
+   and drifts upward in place — so they populate the whole field instead of all rising
+   from the floor. Opacity breathes but never hits 0, so the gathering stays present
+   (and never blinks out in a fixed spot). Per-bubble --dx/--dy vary the drift. */
+@keyframes bubble-float {
+  0%   { transform: translate3d(0, 0, 0) scale(0.95); opacity: 0.6; }
+  50%  { transform: translate3d(var(--dx, 8px), var(--dy, -20px), 0) scale(1.06); opacity: 0.85; }
+  100% { transform: translate3d(0, 0, 0) scale(0.95); opacity: 0.6; }
+}
+
+/* The seam: a soft fold of light along the diagonal. Low opacity, no geometry —
+   it recedes completely when the worlds merge (--seam-opacity → 0). */
+.model-seam {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--seam-opacity, 0);
+  background: linear-gradient(
+    138deg,
+    transparent 47%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 53%
+  );
+  mix-blend-mode: soft-light;
+  transition: opacity 600ms var(--ease);
+}
+
+/* Composed stage: the primary card sits higher-left as the hero, the secondary
+   lower-right as the supporting voice — a diagonal pair. They are placed via top /
+   bottom (transform is reserved for the float + entrance), and the stage is sized so
+   the pair reads vertically centred with no dead band below. Tune the 478px offset in
+   dev:local if the footer height shifts. */
+.model-stage {
+  position: relative;
+  min-height: clamp(320px, calc(100vh - 412px), 496px);
+}
+
+.model-card-wrap {
+  position: absolute;
   display: flex;
   flex-direction: column;
-  min-height: 320px;
+  will-change: transform;
+}
+
+/* Idle float — this screen is seen once at the start and the motion is purely
+   decorative/premium, so the Frequency Gate allows a *barely* noticeable drift
+   (Emil's golden rule). Different axis / phase / period per card so they never move
+   in lockstep; GPU transform only; paused on hover/focus so editing stays steady. */
+.model-card-wrap.primary {
+  top: 6%;
+  left: 7%;
+  width: min(440px, 42vw);
+  animation: card-float-a 11s ease-in-out infinite alternate;
+}
+
+.model-card-wrap.secondary {
+  right: 7%;
+  bottom: 6%;
+  width: min(356px, 35vw);
+  animation: card-float-b 13s ease-in-out -4s infinite alternate;
+}
+
+.model-card-wrap.primary:hover,
+.model-card-wrap.primary:focus-within,
+.model-card-wrap.secondary:hover,
+.model-card-wrap.secondary:focus-within {
+  animation-play-state: paused;
+}
+
+@keyframes card-float-a {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(0, -7px, 0); }
+}
+
+@keyframes card-float-b {
+  from { transform: translate3d(0, 5px, 0); }
+  to   { transform: translate3d(-4px, -5px, 0); }
+}
+
+.panel.model-card {
+  position: relative;
+  background: var(--card-bg);
+  color: var(--card-ink);
+  border: 0;
+  border-radius: var(--card-radius);
+  /* Hover lift uses the gentler --ease over a longer 280ms so it feels like a fluid
+     rise, not a stiff snap. Glow/surface keep 600ms for the model-swap crossfade. */
+  transition: background 600ms var(--ease), color 600ms var(--ease), border-radius 500ms var(--ease), box-shadow 600ms var(--ease), transform 280ms var(--ease);
+}
+
+/* A soft elevation shadow that fades in on hover/focus, decoupled from the 600ms glow
+   so the card visibly *rises* (shadow blooms + lift together) instead of just nudging
+   2px. This is what makes the hover read as smooth rather than mechanical. */
+.panel.model-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: 0 16px 40px rgba(15, 15, 18, 0.12);
+  transition: opacity 280ms var(--ease);
+}
+
+.model-card-wrap:hover .panel.model-card::before,
+.panel.model-card:focus-within::before {
+  opacity: 1;
+}
+
+/* Hero — the chosen instrument: larger padding, a solid surface, and the world's
+   accent glow as its lift. Elevation IS the hierarchy: a hairline shadow-ring (not a
+   CSS border) + a soft near-shadow + the glow, one coherent shadow system — no
+   border-plus-big-shadow ghost-card pairing. */
+.panel.model-card.primary {
+  --card-bg: var(--p-card);
+  --card-ink: var(--p-ink);
+  --card-ink-muted: var(--p-ink-muted);
+  --card-hairline: var(--p-hairline);
+  --card-accent: var(--p-accent);
+  --card-glow: var(--p-glow);
+  --card-radius: var(--p-radius);
+  padding: 26px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--p-ink) 7%, transparent),
+    0 2px 8px rgba(15, 15, 18, 0.05),
+    0 30px 80px var(--card-glow);
+}
+
+/* Supporting — the optional lens: a quieter surface that leans toward its field, a
+   fainter ring, a smaller lift, a lighter glow. Plainly subordinate to the hero. */
+.panel.model-card.secondary {
+  --card-bg: color-mix(in srgb, var(--s-card) 86%, var(--s-side));
+  --card-ink: var(--s-ink);
+  --card-ink-muted: var(--s-ink-muted);
+  --card-hairline: var(--s-hairline);
+  --card-accent: var(--s-accent);
+  --card-glow: var(--s-glow);
+  --card-radius: var(--s-radius);
+  padding: 18px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--s-ink) 5%, transparent),
+    0 1px 4px rgba(15, 15, 18, 0.04),
+    0 14px 40px var(--card-glow);
+}
+
+.panel.model-card:hover {
+  transform: translateY(-3px);
+}
+
+.panel.model-card:focus-within {
+  transform: translateY(-4px);
+}
+
+/* Hand-off entrance: each inner surface rises ≤12px and fades up, secondary staggered
+   after primary, so the pair arrives as a sequence under the atmosphere rather than
+   with the shell. Driven by .is-entering (added only on a real screen change). */
+.model-stage.is-entering .panel.model-card {
+  animation: card-rise 460ms var(--ease) both;
+}
+
+.model-stage.is-entering .model-card-wrap.secondary .panel.model-card {
+  animation-delay: 60ms;
+}
+
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Model-switch acknowledgement: a soft accent ring blooms and fades on the changed
+   card (~260ms). On a pseudo so it never fights the float / lift transforms and adds
+   no layout shift. Pairs with the 600ms palette crossfade for a quiet "got it". */
+.panel.model-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--card-accent) 52%, transparent);
+}
+
+.panel.model-card.is-acked::after {
+  animation: card-ack 260ms var(--ease);
+}
+
+@keyframes card-ack {
+  0%   { opacity: 0; transform: scale(0.992); }
+  45%  { opacity: 0.7; }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+/* ---- Card as a role object ---- */
+.model-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .model-role {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 14px;
+}
+
+.role-name {
   font-size: 12px;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--ink-muted);
+  color: var(--card-ink);
+}
+
+.role-caption {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--card-ink-muted, var(--ink-muted));
+}
+
+.model-purpose {
+  margin: 8px 0 14px;
+  color: var(--card-ink-muted, var(--ink-muted));
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.model-fields {
+  display: grid;
+  gap: 13px;
+}
+
+.model-fields .field {
+  margin-bottom: 0;
+  gap: 6px;
+}
+
+/* Labels: smaller and heavier, and a touch darker on the hero so its fields feel
+   like the primary input. */
+.model-card .label {
+  color: var(--card-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  opacity: 0.62;
+}
+
+.model-card.primary .label {
+  opacity: 0.82;
+}
+
+/* Selects: a consistent 44px target, a softer (less saturated) resting border that
+   leans on the world's accent, a translucent surface so the field belongs to the
+   card, and a quiet accent focus ring. */
+.model-card .select {
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card-bg) 88%, transparent);
+  border-color: color-mix(in srgb, var(--card-accent) 18%, var(--card-hairline));
+  color: var(--card-ink);
+}
+
+.model-card .select:hover {
+  border-color: color-mix(in srgb, var(--card-accent) 34%, var(--card-hairline));
+}
+
+.model-card .select:focus {
+  border-color: color-mix(in srgb, var(--card-accent) 60%, var(--card-hairline));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--card-accent) 14%, transparent);
 }
 
 .role-dot {
   width: 9px;
   height: 9px;
   border-radius: 999px;
+  background: var(--card-accent, var(--primary));
 }
 
-.role-dot.primary {
-  background: var(--role-primary);
+/* Model CTA: a single confident pill in the primary world's (deepened) accent — the
+   instrument you chose. No decorative slash. On hover the secondary world's warm
+   accent slides in as a quiet right-edge glow; when both models match it has no
+   second voice to show, so the glow simply doesn't appear. */
+.button.primary.model-cta {
+  position: relative;
+  overflow: hidden;
+  color: #ffffff;
+  background: var(--p-cta);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--p-cta) 26%, transparent);
+  transition: background 480ms var(--ease), box-shadow 240ms var(--ease), transform 120ms var(--ease);
 }
 
-.role-dot.secondary {
-  background: var(--role-secondary);
+.button.primary.model-cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(120% 170% at 100% 50%, color-mix(in srgb, var(--s-accent) 78%, transparent), transparent 58%);
+  opacity: 0;
+  transition: opacity 320ms var(--ease);
+  pointer-events: none;
 }
 
-.model-meta {
-  display: grid;
-  gap: 6px;
-  margin-top: auto;
-  padding-top: 14px;
-  color: var(--ink-muted);
-  font-size: 12px;
-  line-height: 1.4;
+.button.primary.model-cta:hover {
+  box-shadow: 0 14px 36px color-mix(in srgb, var(--p-cta) 32%, transparent);
+}
+
+.button.primary.model-cta:hover::after {
+  opacity: 0.55;
+}
+
+.button.primary.model-cta .btn-label {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- CTA hover arrow ---------- */
+.btn-label {
+  display: inline-block;
+  position: relative;
+  transition: padding-right 320ms var(--ease);
+}
+
+.button.has-arrow .btn-label::after {
+  content: "\00BB";
+  position: absolute;
+  top: 0;
+  right: -14px;
+  opacity: 0;
+  transition: right 320ms var(--ease), opacity 320ms var(--ease);
+}
+
+.button.has-arrow:hover .btn-label {
+  padding-right: 16px;
+}
+
+.button.has-arrow:hover .btn-label::after {
+  opacity: 1;
+  right: 0;
+}
+
+/* ---------- Diagonal split text ---------- */
+.split-text {
+  position: relative;
+  display: inline-block;
+  white-space: pre;
+  /* The clipped layers below are inset to this box. Without vertical padding the
+     box is only line-height tall, so glyph ascenders/descenders fall outside the
+     clip region and the title looks cropped. The padding gives the clip room. */
+  padding: 0.14em 0 0.26em;
+  --seam-top: 56%;
+  --seam-bottom: 44%;
+}
+
+.split-base {
+  color: transparent;
+}
+
+.split-layer {
+  position: absolute;
+  inset: 0;
+  white-space: pre;
+  pointer-events: none;
+  transition: color 500ms var(--ease);
+}
+
+.split-layer.left {
+  color: var(--sl, currentColor);
+  clip-path: polygon(0 0, var(--seam-top) 0, var(--seam-bottom) 100%, 0 100%);
+}
+
+.split-layer.right {
+  color: var(--sr, currentColor);
+  clip-path: polygon(var(--seam-top) 0, 100% 0, 100% 100%, var(--seam-bottom) 100%);
 }
 
 .panel {
@@ -879,7 +1570,34 @@ button {
   opacity: 0;
 }
 
-/* ---------- Intro ---------- */
+/* ---------- Boot (entrance loader) ---------- */
+.boot {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--mood-wash), var(--canvas);
+}
+
+/* Minimal matrix bars that rise in place while the local studio loads. */
+.boot-loader {
+  width: 44px;
+  height: 40px;
+  --boot-c: var(--primary);
+  background:
+    linear-gradient(#0000 calc(1 * 100% / 6), var(--boot-c) 0 calc(3 * 100% / 6), #0000 0),
+    linear-gradient(#0000 calc(2 * 100% / 6), var(--boot-c) 0 calc(4 * 100% / 6), #0000 0),
+    linear-gradient(#0000 calc(3 * 100% / 6), var(--boot-c) 0 calc(5 * 100% / 6), #0000 0);
+  background-size: 9px 400%;
+  background-repeat: no-repeat;
+  animation: boot-matrix 1s infinite linear;
+}
+
+@keyframes boot-matrix {
+  0%   { background-position: 0% 100%, 50% 100%, 100% 100%; }
+  100% { background-position: 0% 0%, 50% 0%, 100% 0%; }
+}
+
+/* ---------- Intro (name reveal) ---------- */
 .intro {
   position: relative;
   min-height: 100vh;
@@ -889,82 +1607,489 @@ button {
   background: var(--mood-wash), var(--canvas);
 }
 
-.intro-stage {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 18px;
-  text-align: center;
+/* Interactive grid backdrop: a faint base grid that "prints in" with the
+   reveal, plus a primary-tinted layer masked to a spotlight under the cursor. */
+.intro-field {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  --mx: 50%;
+  --my: 44%;
+}
+
+.intro-grid,
+.intro-grid-glow {
+  position: absolute;
+  inset: -2px;
+  background-image:
+    linear-gradient(var(--intro-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--intro-line) 1px, transparent 1px);
+  background-size: 44px 44px;
 }
 
 .intro-grid {
-  position: absolute;
-  inset: -40vmax;
-  background-image:
-    linear-gradient(var(--hairline) 1px, transparent 1px),
-    linear-gradient(90deg, var(--hairline) 1px, transparent 1px);
-  background-size: 46px 46px;
+  --intro-line: color-mix(in srgb, var(--ink) 9%, transparent);
   opacity: 0;
-  mask-image: radial-gradient(circle at center, #000 0%, transparent 58%);
-  -webkit-mask-image: radial-gradient(circle at center, #000 0%, transparent 58%);
-  animation: intro-grid 1.6s var(--ease) 0.4s forwards;
+  animation: intro-grid-in 1.2s var(--ease) forwards;
 }
 
-.intro-spark {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--primary);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 40%, transparent);
-  animation: intro-spark 1.2s var(--ease) forwards;
+.intro-grid-glow {
+  --intro-line: color-mix(in srgb, var(--primary) 60%, transparent);
+  opacity: 0;
+  transition: opacity 320ms var(--ease);
+  -webkit-mask-image: radial-gradient(200px circle at var(--mx) var(--my), #000 0%, transparent 72%);
+  mask-image: radial-gradient(200px circle at var(--mx) var(--my), #000 0%, transparent 72%);
+}
+
+.intro:hover .intro-grid-glow {
+  opacity: 1;
+}
+
+.intro-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+  text-align: center;
 }
 
 .intro-wordmark {
-  position: relative;
   margin: 0;
-  font-size: clamp(40px, 8vw, 72px);
+  display: inline-block;
+  font-size: clamp(40px, 8vw, 76px);
   font-weight: var(--heading-weight);
   letter-spacing: -0.04em;
   color: var(--ink);
-  opacity: 0;
-  animation: intro-fade 0.7s var(--ease) 1.0s forwards;
 }
 
-.intro-sub {
-  margin: 0;
-  color: var(--ink-muted);
-  font-size: 17px;
-  opacity: 0;
-  animation: intro-fade 0.7s var(--ease) 1.5s forwards;
-}
-
-.intro-skip {
-  position: fixed;
-  right: 24px;
-  bottom: 22px;
-  color: var(--ink-subtle);
-  font-size: 13px;
-  font-weight: 600;
-  background: transparent;
+/* Start Designing — the one action on the page. Enters after the letters settle
+   (delay tracks the real entrance via --cta-delay), lifts 1px on hover, and presses
+   with a scale(0.97) on :active so it feels like it heard the click. White-on-accent
+   contrast is well past 4.5:1 (--primary #5e6ad2 vs #fff ≈ 4.7:1). */
+.intro-cta {
+  position: relative;
   border: 0;
+  border-radius: var(--radius-pill);
+  padding: 13px 26px;
+  color: var(--primary-ink);
+  background: var(--primary);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--primary) 26%, transparent);
   opacity: 0;
-  animation: intro-fade 0.5s var(--ease) 0.6s forwards;
+  transform: translateY(8px);
+  animation: intro-cta-in 460ms var(--ease-out-soft) var(--cta-delay, 900ms) both;
+  transition: transform 160ms var(--ease-out-soft), box-shadow 200ms var(--ease-out-soft), background 200ms var(--ease-out-soft);
 }
 
-@keyframes intro-spark {
-  0% { opacity: 0; transform: scale(0.2); }
-  40% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 10px color-mix(in srgb, var(--primary) 18%, transparent); }
-  100% { opacity: 1; transform: scale(0.85); box-shadow: 0 0 0 0 transparent; }
+.intro-cta:hover {
+  transform: translateY(-1px);
+  background: var(--primary-hover);
+  box-shadow: 0 14px 36px color-mix(in srgb, var(--primary) 32%, transparent);
 }
 
-@keyframes intro-grid {
-  from { opacity: 0; transform: scale(1.04); }
-  to { opacity: 0.5; transform: scale(1); }
+.intro-cta:active {
+  transform: scale(0.97);
+  transition-duration: 100ms;
 }
 
-@keyframes intro-fade {
+.intro-cta:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+}
+
+/* Each letter flies in along X at an offset, turns 90deg, and drops into place.
+   Per-letter custom props (--entry-x / --turn-y / --exit-x / --exit-y) set the path. */
+.intro-letter {
+  display: inline-block;
+  white-space: pre;
+  opacity: 0;
+  transform: translate(var(--entry-x), var(--turn-y));
+  animation: letter-in 520ms var(--ease) calc(var(--i) * 26ms) both;
+}
+
+.intro-stage.is-exiting .intro-letter {
+  animation: letter-out 400ms var(--ease) calc(var(--i) * 22ms) both;
+}
+
+/* ---- Anatomy blueprint ----
+   On CTA hover/focus, four spec call-outs snap in around the title + button. The
+   geometry borrows the Uiverse blueprint idiom, but labels the actual page tokens:
+   typography, accent, primary action, and canvas grid. Leaders stay hairline-thin
+   and mostly diagonal so the overlay feels like a minimal design-tool inspection
+   layer instead of button decoration. */
+.intro-anatomy {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  --bp-ink: var(--ink-soft);
+  /* Match the wordmark's responsive size so the type call-outs can be anchored in
+     `em` and track the letters as the display font scales with the viewport. The
+     `.bp-tag` labels reset to their own fixed px size, so this only drives geometry. */
+  font-size: clamp(40px, 8vw, 76px);
+}
+
+/* Each call-out fades + scales in (the spec-sheet "pop"), staggered ~60ms apart. */
+.bp {
+  position: absolute;
+  opacity: 0;
+  transform: scale(1.14);
+  transition:
+    opacity 200ms var(--ease-out-soft) calc(var(--n) * 42ms),
+    transform 200ms var(--ease-out-soft) calc(var(--n) * 42ms);
+}
+
+.intro-anatomy.is-revealed .bp {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Blueprint primitives */
+.bp-leader,
+.bp-stem {
+  position: absolute;
+  background: var(--bp-ink);
+}
+
+.bp-leader {
+  /* Crisp 1px hairline: 1.5px never snaps to the pixel grid, so vertical and
+     horizontal leaders (and the bracket strokes) rendered at visibly different
+     weights. A flat 1px keeps every line in the blueprint the same thickness. */
+  height: 1px;
+  transform-origin: left center;
+  transform: rotate(var(--bp-angle, 0deg)) scaleX(0);
+  transition: transform 220ms var(--ease-out-soft) calc(var(--n) * 42ms + 30ms);
+}
+
+.intro-anatomy.is-revealed .bp-leader {
+  transform: rotate(var(--bp-angle, 0deg)) scaleX(1);
+}
+
+.bp-dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bp-ink);
+}
+
+.bp-ring {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--bp-ink);
+  border-radius: 50%;
+}
+
+.bp-tag {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.bp-sw {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--c, var(--ink));
+}
+
+/* The canvas swatch is near-white — give it a ring so it reads on the light page. */
+.bp-sw-ring {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 34%, transparent);
+}
+
+/* Seven-node anatomy, anchored to the real geometry of the wordmark + CTA. Each
+   call-out's `.bp` sits exactly on the thing it labels (a letter cap, the button
+   face, the baseline) so the leader can leave that point and the dot/ring reads as
+   a true anchor. Wordmark nodes anchor in `em` off the centre (50%) so the letter
+   pointers track the responsive display font; button nodes anchor in px off centre.
+   The exact positions below were dialled in with the anatomy editor (dev:anatomy)
+   against a 76px display / 334px stage, then converted back to this scheme. */
+
+/* TYPE — short diagonal off the cap of the first "T" up to the display-type label. */
+.bp-type {
+  left: calc(50% - 1.904em);
+  top: 0.255em;
+}
+
+.bp-type .bp-dot {
+  left: -3px;
+  top: -3px;
+}
+
+.bp-type .bp-leader {
+  --bp-angle: -116.8deg;
+  left: 0;
+  top: 0;
+  width: 43px;
+}
+
+.bp-type .bp-tag {
+  left: -74px;
+  top: -55px;
+}
+
+/* CAP HEIGHT — a vertical measure bracket down the left edge of the wordmark,
+   spanning cap line to baseline. Draws with a scaleY that mirrors the horizontal
+   bracket's scaleX, so it reads in the same reveal language. */
+.bp-cap {
+  left: calc(50% - 2.288em);
+  top: 0.295em;
+  height: 0;
+}
+
+.bp-cap .bp-vbracket {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 0.855em;
+  background: var(--bp-ink);
+  transform-origin: top center;
+  transform: scaleY(0);
+  transition: transform 220ms var(--ease-out-soft) calc(var(--n) * 42ms + 30ms);
+}
+
+.bp-cap .bp-vbracket::before,
+.bp-cap .bp-vbracket::after {
+  content: "";
+  position: absolute;
+  left: -4px;
+  width: 9px;
+  height: 1px;
+  background: var(--bp-ink);
+}
+
+.bp-cap .bp-vbracket::before { top: 0; }
+.bp-cap .bp-vbracket::after { bottom: 0; }
+
+.intro-anatomy.is-revealed .bp-cap .bp-vbracket {
+  transform: scaleY(1);
+}
+
+.bp-cap .bp-tag {
+  left: -71px;
+  top: 26px;
+}
+
+/* TRACKING — the one upper diagonal, off the cap of the final "t". */
+.bp-track {
+  left: calc(50% + 2.020em);
+  top: 0.374em;
+}
+
+.bp-track .bp-dot {
+  left: -3px;
+  top: -3px;
+}
+
+.bp-track .bp-leader {
+  --bp-angle: -33deg;
+  left: 0;
+  top: 0;
+  width: 69px;
+}
+
+.bp-track .bp-tag {
+  left: 67px;
+  top: -50px;
+}
+
+/* BASELINE — a horizontal guide riding the type baseline under "int". */
+.bp-base {
+  left: calc(50% + 1.166em);
+  top: 1.150em;
+}
+
+.bp-base .bp-dot {
+  left: -2px;
+  top: -2px;
+  width: 4px;
+  height: 4px;
+}
+
+.bp-base .bp-leader {
+  --bp-angle: 0deg;
+  left: 0;
+  top: 0;
+  width: 116px;
+}
+
+.bp-base .bp-tag {
+  left: 122px;
+  top: -8px;
+}
+
+/* ACCENT — the dot sits just off the button's left edge; a short diagonal leader
+   runs up to the swatch. The accent label belongs to the button, not the canvas. */
+.bp-accent {
+  left: calc(50% - 85px);
+  bottom: 24px;
+}
+
+.bp-accent .bp-dot {
+  left: -3px;
+  top: -3px;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.bp-accent .bp-leader {
+  --bp-angle: -154.1deg;
+  left: 0;
+  top: 0;
+  width: 29px;
+  background: color-mix(in srgb, var(--primary) 72%, var(--bp-ink));
+}
+
+.bp-accent .bp-tag {
+  left: -154px;
+  top: -24px;
+}
+
+/* PRIMARY ACTION — a width bracket hugging the button's underside, dropping a short
+   vertical leader to a centred label. */
+.bp-action {
+  left: calc(50% - 76px);
+  bottom: 0;
+  width: 152px;
+  height: 0;
+  transform-origin: center bottom;
+}
+
+.bp-action .bp-bracket {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 1px;
+  background: var(--bp-ink);
+  transform-origin: center;
+  transform: scaleX(0);
+  transition: transform 220ms var(--ease-out-soft) calc(var(--n) * 42ms + 30ms);
+}
+
+.bp-action .bp-bracket::before,
+.bp-action .bp-bracket::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  width: 1px;
+  height: 9px;
+  background: var(--bp-ink);
+}
+
+.bp-action .bp-bracket::before { left: 0; }
+.bp-action .bp-bracket::after { right: 0; }
+
+.intro-anatomy.is-revealed .bp-action .bp-bracket {
+  transform: scaleX(1);
+}
+
+.bp-action .bp-leader {
+  --bp-angle: 90deg;
+  left: 76px;
+  bottom: -10px;
+  width: 22px;
+}
+
+.bp-action .bp-tag {
+  left: 31px;
+  top: 37px;
+}
+
+/* CANVAS / GRID — ring centred on its anchor; the leader leaves the ring edge
+   on-axis (ring radius 6.5 → start at 5,4 along the 39° angle) so the circle and the
+   line read as one mark. The lower diagonal balances the tracking leader up top. */
+.bp-grid-note {
+  left: calc(50% + 110px);
+  bottom: 55px;
+}
+
+.bp-grid-note .bp-ring {
+  left: -6px;
+  top: -6px;
+}
+
+.bp-grid-note .bp-leader {
+  --bp-angle: 39.2deg;
+  left: 5px;
+  top: 4px;
+  width: 63px;
+}
+
+.bp-grid-note .bp-tag {
+  left: 57px;
+  top: 40px;
+}
+
+/* ---- Intro exit (cross-dissolve into models) ----
+   Click-out fades the grid, CTA, and anatomy together while the letters fly out, so
+   the models canvas comes up underneath as one dissolve rather than a cut. */
+.intro.is-leaving .intro-field,
+.intro.is-leaving .intro-anatomy {
+  opacity: 0;
+  transition: opacity 340ms var(--ease);
+}
+
+.intro.is-leaving .intro-cta {
+  animation: none;
+  opacity: 0;
+  transform: translateY(6px) scale(0.99);
+  transition: opacity 280ms var(--ease), transform 280ms var(--ease);
+}
+
+@keyframes intro-grid-in {
+  0%   { opacity: 0; transform: scale(1.05); }
+  35%  { opacity: 0.85; }
+  100% { opacity: 0.5; transform: scale(1); }
+}
+
+@keyframes letter-in {
+  0%   { opacity: 0; transform: translate(var(--entry-x), var(--turn-y)); animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+  14%  { opacity: 1; }
+  50%  { opacity: 1; transform: translate(0, var(--turn-y)); animation-timing-function: cubic-bezier(0.7, 0, 0.2, 1); }
+  100% { opacity: 1; transform: translate(0, 0); }
+}
+
+@keyframes letter-out {
+  0%   { opacity: 1; transform: translate(0, 0); animation-timing-function: cubic-bezier(0.7, 0, 0.84, 0); }
+  46%  { opacity: 1; transform: translate(0, var(--exit-y)); animation-timing-function: cubic-bezier(0.6, 0, 0.3, 1); }
+  62%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--exit-x), var(--exit-y)); }
+}
+
+@keyframes intro-cta-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.intro.is-static .intro-letter {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+
+.intro.is-static .intro-grid {
+  opacity: 0.5;
+  animation: none;
+}
+
+.intro.is-static .intro-cta {
+  opacity: 1;
+  transform: none;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -978,10 +2103,32 @@ button {
 
   .intro-grid,
   .intro-wordmark,
-  .intro-sub,
-  .intro-spark,
-  .intro-skip {
+  .intro-letter,
+  .intro-cta {
     opacity: 1;
+  }
+
+  /* Anatomy still appears on hover/focus, but instantly — no scale-in pop. Leader
+     lines/brackets keep their own static transforms (rotate) via their inline rules. */
+  .bp {
+    transform: none !important;
+  }
+
+  /* Freeze every ambient model-screen loop to a static frame: no float, no flowing
+     gradient, no bloom drift, no grid/dot drift, no rising bubbles. Only crossfades. */
+  .atmos-flow,
+  .atmos-blob,
+  .fx-grid,
+  .fx-dots,
+  .bubble,
+  .model-card-wrap.primary,
+  .model-card-wrap.secondary {
+    animation: none !important;
+    transform: none !important;
+  }
+
+  .bubble {
+    opacity: 0.42;
   }
 }
 
@@ -1013,7 +2160,6 @@ button {
     justify-content: center;
   }
 
-  .model-grid,
   .choice-grid,
   .choice-grid.three,
   .reference-grid,
@@ -1022,8 +2168,20 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .model-panel {
+  .model-stage {
+    position: static;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .model-card-wrap {
+    position: static;
+    width: 100%;
+    /* Stacked vertically on small screens — drop the diagonal float so the cards
+       don't drift into each other. */
+    animation: none;
   }
 }
 
@@ -1035,5 +2193,11 @@ button {
   .screen,
   .screen.wide {
     width: min(100vw - 28px, 680px);
+  }
+
+  /* The anatomy blueprint needs room around the wordmark; on phones it would crowd
+     the composition, so drop it (it is decorative + aria-hidden anyway). */
+  .intro-anatomy {
+    display: none;
   }
 }
