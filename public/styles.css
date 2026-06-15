@@ -1605,49 +1605,113 @@ button {
   place-items: center;
   overflow: hidden;
   background: var(--mood-wash), var(--canvas);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-/* Interactive grid backdrop: a faint base grid that "prints in" with the
-   reveal, plus a primary-tinted layer masked to a spotlight under the cursor. */
+/* Dome gallery backdrop. The grid line / cursor-spotlight field is gone; the intro
+   now sits inside a full-bleed fish-eye wall of website-like tiles wrapped on a shallow curve
+   (a vanilla port of React Bits' DomeGallery). It enters with the reveal, drifts
+   slowly left with momentum/inertia on drag, and leaves with the intro. The tiles stay
+   vivid at the edges and are quieted toward the centre by a canvas wash so the wordmark
+   reads. Purely decorative — aria-hidden, empty alt, pointer-events: none, no clicks. */
 .intro-field {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  --mx: 50%;
-  --my: 44%;
+  z-index: 0;
 }
 
-.intro-grid,
-.intro-grid-glow {
+.intro-dome-layer {
   position: absolute;
-  inset: -2px;
-  background-image:
-    linear-gradient(var(--intro-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--intro-line) 1px, transparent 1px);
-  background-size: 44px 44px;
+  left: 50%;
+  top: 50%;
+  /* Over-fill the viewport so tiles bleed off every edge — the gallery owns the whole
+     screen rather than sitting in a centered box with white margins. */
+  width: 142vw;
+  height: 122vh;
+  transform: translate3d(-50%, -50%, 0) scale(1);
+  opacity: .9;
+  filter: none;
+  animation: intro-dome-in 1080ms var(--ease) 160ms backwards;
+  pointer-events: none;
+  --dome-radius: clamp(860px, 104vw, 1460px);
+  --dome-segments: 14;
+  --dome-rot-y: calc((360deg / var(--dome-segments)) / 2);
+  --dome-circ: calc(var(--dome-radius) * 3.14);
+  /* Smaller tiles → more of them fit with clean gaps, so the wall reads full without any
+     two cards ever touching. The JS keeps centres a guaranteed margin apart (MIN_SEP), so
+     the gap between cards is real, never an overlap. */
+  --dome-tile-w: clamp(200px, calc(var(--dome-circ) / var(--dome-segments) * 1.05), 360px);
+  --dome-tile-h: calc(var(--dome-tile-w) * 0.64);
+  --dome-row-gap: clamp(360px, 33vh, 460px);
 }
 
-.intro-grid {
-  --intro-line: color-mix(in srgb, var(--ink) 9%, transparent);
-  opacity: 0;
-  animation: intro-grid-in 1.2s var(--ease) forwards;
+/* The dome itself is masked at the edges; this element is reserved for future
+   non-interactive effects and intentionally does not paint a center panel. */
+.intro-dome-layer::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
 }
 
-.intro-grid-glow {
-  --intro-line: color-mix(in srgb, var(--primary) 60%, transparent);
-  opacity: 0;
-  transition: opacity 320ms var(--ease);
-  -webkit-mask-image: radial-gradient(200px circle at var(--mx) var(--my), #000 0%, transparent 72%);
-  mask-image: radial-gradient(200px circle at var(--mx) var(--my), #000 0%, transparent 72%);
+.intro-dome-stage {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  /* Gentle perspective: enough fish-eye to feel spatial, not enough to read as a globe. */
+  perspective: calc(var(--dome-radius) * 2.45);
+  perspective-origin: 50% 50%;
+  transform-style: preserve-3d;
 }
 
-.intro:hover .intro-grid-glow {
+.intro-dome-sphere,
+.intro-dome-item {
+  transform-style: preserve-3d;
+}
+
+.intro-dome-sphere {
+  will-change: transform;
+}
+
+.intro-dome-item {
+  position: absolute;
+  width: var(--dome-tile-w);
+  height: var(--dome-tile-h);
+  inset: -999px;
+  margin: auto;
+  backface-visibility: hidden;
+  transform:
+    rotateY(calc(var(--dome-rot-y) * var(--x)))
+    translateY(calc(var(--dome-row-gap) * var(--y)))
+    rotateZ(var(--tilt, 0deg))
+    translateZ(var(--dome-radius));
+}
+
+.intro-dome-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 10px;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--ink) 9%, transparent);
+  /* Full-strength colour at the edges; the centre wash (.intro-stage::before /
+     .intro-anatomy::before) is what quiets the tiles near the title, so the falloff
+     tracks the rotating wall instead of being baked per-tile. */
+  filter: none;
   opacity: 1;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
 }
 
 .intro-stage {
   position: relative;
-  z-index: 1;
+  z-index: 3;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1655,13 +1719,34 @@ button {
   text-align: center;
 }
 
+/* Persistent centre wash: a soft canvas veil over the busiest part of the wall so the
+   wordmark + CTA stay crisp while the edges keep their full colour. Sits above the dome
+   (whole stage is above the field) but below the text. */
+.intro-stage::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: -1;
+  width: min(760px, 96vw);
+  height: 330px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--canvas) 82%, transparent) 0%, color-mix(in srgb, var(--canvas) 46%, transparent) 45%, transparent 74%);
+  filter: blur(18px);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 .intro-wordmark {
+  position: relative;
+  z-index: 2;
   margin: 0;
   display: inline-block;
   font-size: clamp(40px, 8vw, 76px);
   font-weight: var(--heading-weight);
   letter-spacing: -0.04em;
   color: var(--ink);
+  text-shadow: 0 1px 18px color-mix(in srgb, var(--canvas) 68%, transparent);
 }
 
 /* Start Designing — the one action on the page. Enters after the letters settle
@@ -1670,6 +1755,7 @@ button {
    contrast is well past 4.5:1 (--primary #5e6ad2 vs #fff ≈ 4.7:1). */
 .intro-cta {
   position: relative;
+  z-index: 2;
   border: 0;
   border-radius: var(--radius-pill);
   padding: 13px 26px;
@@ -1679,9 +1765,9 @@ button {
   font-weight: 650;
   letter-spacing: -0.005em;
   box-shadow: 0 10px 30px color-mix(in srgb, var(--primary) 26%, transparent);
-  opacity: 0;
-  transform: translateY(8px);
-  animation: intro-cta-in 460ms var(--ease-out-soft) var(--cta-delay, 900ms) both;
+  opacity: 1;
+  transform: translateY(0);
+  animation: intro-cta-in 460ms var(--ease-out-soft) var(--cta-delay, 900ms) backwards;
   transition: transform 160ms var(--ease-out-soft), box-shadow 200ms var(--ease-out-soft), background 200ms var(--ease-out-soft);
 }
 
@@ -1726,11 +1812,41 @@ button {
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  --bp-ink: var(--ink-soft);
+  --bp-ink: color-mix(in srgb, var(--ink) 74%, transparent);
   /* Match the wordmark's responsive size so the type call-outs can be anchored in
      `em` and track the letters as the display font scales with the viewport. The
      `.bp-tag` labels reset to their own fixed px size, so this only drives geometry. */
   font-size: clamp(40px, 8vw, 76px);
+}
+
+/* On reveal, a broader canvas veil fades up behind the blueprint so the hairline
+   leaders and labels read cleanly against the colourful wall. Sits below the .bp nodes
+   (tree order) but above the dome, and reuses the centre-wash idea at higher strength. */
+.intro-anatomy::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(1040px, 126vw);
+  height: min(620px, 86vh);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.88);
+  background:
+    radial-gradient(ellipse 45% 34% at 50% 50%, color-mix(in srgb, var(--canvas) 96%, transparent) 0%, color-mix(in srgb, var(--canvas) 78%, transparent) 48%, transparent 72%),
+    radial-gradient(ellipse 78% 62% at 50% 50%, color-mix(in srgb, var(--canvas) 48%, transparent) 0%, color-mix(in srgb, var(--canvas) 22%, transparent) 58%, transparent 82%);
+  filter: blur(22px);
+  opacity: 0;
+  /* A gentle ease-in-out (not the front-loaded --ease-out-soft) so the wash glides up
+     instead of snapping to full opacity — it reads as a soft veil settling in. All three
+     properties share the curve/duration so the veil scales, sharpens, and fades as one. */
+  transition: opacity 360ms cubic-bezier(0.4, 0, 0.2, 1), transform 360ms cubic-bezier(0.4, 0, 0.2, 1), filter 360ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.intro-anatomy.is-revealed::before {
+  opacity: 1;
+  filter: blur(13px);
+  transform: translate(-50%, -50%) scale(1);
 }
 
 /* Each call-out fades + scales in (the spec-sheet "pop"), staggered ~60ms apart. */
@@ -1793,7 +1909,9 @@ button {
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.01em;
-  color: var(--ink-muted);
+  color: color-mix(in srgb, var(--ink) 82%, transparent);
+  /* Canvas halo keeps the mono labels legible even where they cross a bright tile. */
+  text-shadow: 0 1px 6px var(--canvas), 0 0 3px var(--canvas);
   white-space: nowrap;
 }
 
@@ -2035,12 +2153,23 @@ button {
 }
 
 /* ---- Intro exit (cross-dissolve into models) ----
-   Click-out fades the grid, CTA, and anatomy together while the letters fly out, so
+   Click-out fades the dome, CTA, and anatomy together while the letters fly out, so
    the models canvas comes up underneath as one dissolve rather than a cut. */
 .intro.is-leaving .intro-field,
 .intro.is-leaving .intro-anatomy {
   opacity: 0;
   transition: opacity 340ms var(--ease);
+}
+
+/* The dome also lifts + softens on its own so the exit reads as a recede, not just a
+   fade. `animation: none` releases the held entrance keyframe so the transition can
+   run from the rendered state. */
+.intro.is-leaving .intro-dome-layer {
+  animation: none;
+  opacity: 0;
+  filter: blur(10px);
+  transform: translate3d(-50%, calc(-50% - 14px), 0) scale(0.955);
+  transition: opacity 420ms var(--ease), filter 420ms var(--ease), transform 420ms var(--ease);
 }
 
 .intro.is-leaving .intro-cta {
@@ -2050,10 +2179,17 @@ button {
   transition: opacity 280ms var(--ease), transform 280ms var(--ease);
 }
 
-@keyframes intro-grid-in {
-  0%   { opacity: 0; transform: scale(1.05); }
-  35%  { opacity: 0.85; }
-  100% { opacity: 0.5; transform: scale(1); }
+@keyframes intro-dome-in {
+  from {
+    opacity: 0;
+    filter: blur(15px);
+    transform: translate3d(-50%, calc(-50% + 24px), 0) scale(0.95);
+  }
+  to {
+    opacity: .9;
+    filter: blur(0);
+    transform: translate3d(-50%, -50%, 0) scale(1);
+  }
 }
 
 @keyframes letter-in {
@@ -2081,9 +2217,25 @@ button {
   animation: none;
 }
 
-.intro.is-static .intro-grid {
-  opacity: 0.5;
+.intro.is-static .intro-dome-layer {
+  opacity: .86;
+  filter: none;
+  transform: translate3d(-50%, -50%, 0);
   animation: none;
+}
+
+/* Narrow viewports: widen the bleed and shrink the radius so the curve stays full. The
+   row-gap is kept close to the rendered tile height (tile_w * 0.64) so the vertical
+   footprint matches what the blue-noise generator assumes (TILE_Y ≈ 0.84) — otherwise the
+   small mobile tiles float in oversized row slots and the band shows through. */
+@media (max-width: 720px) {
+  .intro-dome-layer {
+    width: 176vw;
+    height: 116vh;
+    --dome-radius: clamp(720px, 168vw, 980px);
+    --dome-tile-w: clamp(170px, calc(var(--dome-circ) / var(--dome-segments) * 1.0), 250px);
+    --dome-row-gap: clamp(125px, 15vh, 170px);
+  }
 }
 
 .intro.is-static .intro-cta {
@@ -2101,11 +2253,20 @@ button {
     transition-duration: 1ms !important;
   }
 
-  .intro-grid,
   .intro-wordmark,
   .intro-letter,
   .intro-cta {
     opacity: 1;
+  }
+
+  /* Quiet static dome: no entrance, no rotation, no exit drift. */
+  .intro-dome-layer,
+  .intro.is-leaving .intro-dome-layer {
+    animation: none !important;
+    transition: none !important;
+    opacity: .82;
+    filter: none;
+    transform: translate3d(-50%, -50%, 0);
   }
 
   /* Anatomy still appears on hover/focus, but instantly — no scale-in pop. Leader

@@ -153,8 +153,7 @@ let shellMounted = false;
 let loaderTimer = null;
 let pendingPulse = false;
 let introTimers = [];
-let introMoveHandler = null;
-let introMoveTarget = null;
+let introDomeCleanup = null;
 let activeTheme = { ...BASE_THEME };
 
 // Name-reveal choreography. CSS animation stagger/durations must match these.
@@ -560,8 +559,7 @@ function mountIntro() {
   app.innerHTML = `
     <div class="intro ${reduce ? "is-static" : ""}">
       <div class="intro-field" id="introField">
-        <div class="intro-grid"></div>
-        <div class="intro-grid-glow"></div>
+        <div class="intro-dome-layer" id="introDome" aria-hidden="true"></div>
       </div>
       <div class="intro-stage" id="introStage">
         <h1 class="intro-wordmark" aria-label="${esc(INTRO_WORD)}">${letters}</h1>
@@ -576,15 +574,9 @@ function mountIntro() {
   clearIntroTimers();
 
   const intro = app.querySelector(".intro");
-  const field = app.querySelector("#introField");
-  if (intro && field && !reduce) {
-    introMoveTarget = intro;
-    introMoveHandler = (event) => {
-      const rect = field.getBoundingClientRect();
-      field.style.setProperty("--mx", `${event.clientX - rect.left}px`);
-      field.style.setProperty("--my", `${event.clientY - rect.top}px`);
-    };
-    intro.addEventListener("pointermove", introMoveHandler);
+  const dome = app.querySelector("#introDome");
+  if (dome) {
+    introDomeCleanup = mountIntroDomeGallery(dome, { inputTarget: intro, reduce });
   }
 
   // The anatomy blueprint reveals on hover OR focus of the CTA — JS toggle (not a
@@ -656,20 +648,316 @@ function introAnatomyHtml() {
       <div class="bp bp-grid-note" style="--n:6">
         <span class="bp-ring"></span>
         <span class="bp-leader"></span>
-        <span class="bp-tag"><i class="bp-sw bp-sw-ring" style="--c:var(--canvas)"></i>Canvas / 44px</span>
+        <span class="bp-tag"><i class="bp-sw bp-sw-ring" style="--c:var(--canvas)"></i>Gallery / ambient</span>
       </div>
     </div>
   `;
 }
 
+// Placeholder wall for the intro dome — React Bits' default stock images. These
+// stand in for the eventual website screenshots; swap the URLs when those land.
+const DOME_IMAGES = [
+  "https://images.unsplash.com/photo-1755331039789-7e5680e26e8f?q=72&w=540&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+  "https://images.unsplash.com/photo-1755569309049-98410b94f66d?q=72&w=540&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+  "https://images.unsplash.com/photo-1755497595318-7e5e3523854f?q=72&w=540&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+  "https://images.unsplash.com/photo-1755353985163-c2a0fe5ac3d8?q=72&w=540&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+  "https://images.unsplash.com/photo-1745965976680-d00be7dc0377?q=72&w=540&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+  "https://images.unsplash.com/photo-1752588975228-21f44630bb3c?q=72&w=540&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+  "https://pbs.twimg.com/media/Gyla7NnXMAAXSo_?format=jpg&name=large"
+];
+
+const DOME_IMAGE_FAMILIES = [
+  "portrait",
+  "architecture",
+  "landscape",
+  "portrait",
+  "animal",
+  "street",
+  "portrait"
+];
+
+// Vanilla port of React Bits' DomeGallery: rectangular tiles laid out on a sphere
+// behind the wordmark. It auto-rotates slowly left and answers pointer
+// drags, but is purely decorative — no clicks, no focus, no enlarge. The whole
+// thing rides `inputTarget` (the .intro element) for pointer input so the CTA stays
+// clickable; the returned cleanup cancels the RAF loop and unbinds listeners.
+function mountIntroDomeGallery(root, { inputTarget, reduce }) {
+  const segments = 14;
+  const X_MIN = -segments;
+  const X_MAX = segments;
+  const X_SPAN = X_MAX - X_MIN;
+  const Y_MIN = -2.42;
+  const Y_MAX = 2.42;
+  // Minimum centre separation, normalised. Tiles are RECTANGLES, so two are kept apart by
+  // clearing on *either* axis — |Δx| ≥ MIN_SEP_X OR |Δy| ≥ MIN_SEP_Y. (A round distance test
+  // instead lets a diagonal neighbour sit close on *both* axes at once, which is how corners
+  // clipped.) A rendered tile spans ~1.05 x-units / ~0.74 y-units (the CSS size multiplier);
+  // MIN_SEP sits comfortably ABOVE that so every pair keeps a real visible gap — no overlap
+  // at all, with margin to spare for the ±1° tilt and any perspective magnification near the
+  // front of the dome.
+  const MIN_SEP_X = 1.1;
+  const MIN_SEP_Y = 0.79;
+  const SIMILAR_CLEAR_X = 4.7;
+  const SIMILAR_CLEAR_Y = 1.55;
+
+  // Deterministic pseudo-random in [0,1) from an integer seed — keeps dev:local
+  // reproducible while letting the layout look genuinely scattered.
+  const rand = (n) => {
+    const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+    return s - Math.floor(s);
+  };
+
+  const wrapDx = (a, b) => {
+    const raw = Math.abs(a - b);
+    return Math.min(raw, X_SPAN - raw);
+  };
+
+  const spacingScore = (a, b, xClear, yClear) => {
+    const dx = wrapDx(a.x, b.x) / xClear;
+    const dy = Math.abs(a.y - b.y) / yClear;
+    return (dx * dx) + (dy * dy);
+  };
+
+  // No sphere-anchored keepout: a cleared patch fixed on the sphere sweeps across the
+  // viewport as the dome rotates, which *was* the "sometimes a large white space" the brief
+  // flagged. Tiles now fill uniformly; the screen-fixed centre wash (.intro-stage::before)
+  // keeps the wordmark + CTA legible over whatever rotates behind them.
+  const isInCenterKeepout = () => {
+    return false;
+  };
+
+  const selectDomeImage = (candidate, placed, counts) => {
+    let best = 0;
+    let bestScore = -Infinity;
+    for (let idx = 0; idx < DOME_IMAGES.length; idx++) {
+      const family = DOME_IMAGE_FAMILIES[idx];
+      let score = rand(candidate.seed + idx * 23) * 0.2 - counts[idx] * 0.24;
+      for (const item of placed) {
+        const similarityDistance = Math.sqrt(spacingScore(candidate, item, SIMILAR_CLEAR_X, SIMILAR_CLEAR_Y));
+        const proximity = Math.max(0, 1 - similarityDistance);
+        if (idx === item.imageIndex) score -= proximity * 5.8;
+        else if (family === item.family) score -= proximity * 2.1;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = idx;
+      }
+    }
+    return best;
+  };
+
+  const commitCandidate = (candidate, placed, counts) => {
+    const imageIndex = selectDomeImage(candidate, placed, counts);
+    counts[imageIndex] += 1;
+    placed.push({
+      ...candidate,
+      imageIndex,
+      family: DOME_IMAGE_FAMILIES[imageIndex],
+      src: DOME_IMAGES[imageIndex]
+    });
+  };
+
+  // Hole-detection and overlap-prevention use *different* footprints, and conflating them
+  // was an early bug: an exclusion radius wide enough to space tiles out also counted a
+  // probe sitting in real visual white as "covered" by a far-off neighbour. So we measure
+  // coverage against the rendered TILE footprint (≈ the CSS size multiplier in x-units,
+  // ≈0.84 in y); the placement guard separately enforces the rectangular NO_OVERLAP test.
+  // A point is a hole when no tile *image* reaches it; we drop a card there as long as
+  // doing so doesn't make it overlap a neighbour.
+  const TILE_X = 1.05;            // tile edge-to-edge pitch, x-units (≈ CSS size mult)
+  const TILE_Y = 0.74;            // tile edge-to-edge pitch, y-units
+  // A probe sits *inside* a tile when spacingScore(probe, tile, TILE_X, TILE_Y) < 0.25
+  // (half a pitch from the centre = the tile edge). So a limit a touch above 0.25 means
+  // "fill until the rendered image actually reaches this point, give or take a thin seam."
+  const COVER_LIMIT = 0.32;
+  const GAP_PROBE_COLS = 96;      // probe resolution around the full ring…
+  const GAP_PROBE_ROWS = 38;      // …and up the band
+  const MAX_GAP_FILLS = 420;      // safety cap so a degenerate config can't loop forever
+
+  // Farthest-point insertion: repeatedly find the emptiest reachable point on the dome and
+  // drop a card there until the rendered tiles actually cover the surface. We always insert
+  // into the *emptiest* spot and refuse any placement that would overlap an existing tile
+  // (rectangular NO_OVERLAP test), so voids close without tiles ever clipping into each
+  // other. Probes are lightly jittered so fills never snap to a visible grid; the |y|
+  // relief lets the extreme top/bottom (which bleed off-screen) stay airier so the wall
+  // still reads as a band. Deterministic throughout via the seeded `rand`.
+  const fillGaps = (placed, counts) => {
+    for (let added = 0; added < MAX_GAP_FILLS; added++) {
+      let worst = null;
+      let worstMargin = 0;
+      for (let cx = 0; cx < GAP_PROBE_COLS; cx++) {
+        for (let cy = 0; cy < GAP_PROBE_ROWS; cy++) {
+          const seed = cx * 73 + cy * 191 + added * 17 + 7;
+          const x = X_MIN + ((cx + 0.5 + (rand(seed) - 0.5) * 0.7) / GAP_PROBE_COLS) * X_SPAN;
+          const y = Y_MIN + ((cy + 0.5 + (rand(seed + 31) - 0.5) * 0.7) / GAP_PROBE_ROWS) * (Y_MAX - Y_MIN);
+          const probe = { x, y, seed, tilt: (rand(seed + 211) - 0.5) * 2 };
+          if (isInCenterKeepout(probe)) continue;
+          // How exposed is this point? Distance to the nearest *rendered tile*.
+          const coverGap = placed.reduce((min, item) => Math.min(min, spacingScore(probe, item, TILE_X, TILE_Y)), Infinity);
+          // Tolerate bigger gaps only at the extreme top/bottom so the band keeps soft ends.
+          const limit = COVER_LIMIT + Math.max(0, Math.abs(y) - 1.9) * 1.4;
+          const margin = coverGap - limit;
+          if (margin <= worstMargin) continue;
+          // Would a card here touch a neighbour? Rectangles only overlap when they're close
+          // on BOTH axes at once, so skip the probe if any placed tile is inside MIN_SEP in
+          // x AND in y. Since MIN_SEP clears the tile footprint with margin, a kept placement
+          // always leaves a visible gap — never a clip.
+          const clips = placed.some((item) => wrapDx(probe.x, item.x) < MIN_SEP_X && Math.abs(probe.y - item.y) < MIN_SEP_Y);
+          if (clips) continue;
+          worstMargin = margin;
+          worst = probe;
+        }
+      }
+      if (!worst) break;   // every probe is reached by a tile → done
+      commitCandidate(worst, placed, counts);
+    }
+  };
+
+  const buildDomeItems = () => {
+    const placed = [];
+    const counts = Array(DOME_IMAGES.length).fill(0);
+    // A handful of scattered anchors, then the wall grows by always filling the emptiest
+    // reachable spot (farthest-point / blue-noise). That keeps the obviously-random,
+    // un-gridded scatter — no rows — while spreading density evenly around the ring so every
+    // rotation looks equally full. MIN_SEP (below) lets tiles layer *slightly*, which is
+    // what gives the wall its packed feel without the deep corner clips.
+    const seeds = [[-11, 0.9], [-6, -1.2], [-1, 1.3], [3.5, -0.6], [8, 1.1], [12.5, -1.0]];
+    for (const [sx, sy] of seeds) {
+      const seed = Math.round(sx * 53 + sy * 97 + 500);
+      commitCandidate({ x: sx, y: sy, seed, tilt: (rand(seed + 211) - 0.5) * 2 }, placed, counts);
+    }
+    fillGaps(placed, counts);
+    return placed;
+  };
+
+  const items = buildDomeItems();
+
+  root.innerHTML = `
+    <div class="intro-dome-stage">
+      <div class="intro-dome-sphere">
+        ${items.map((item) => `
+          <div class="intro-dome-item" style="--x:${item.x.toFixed(3)};--y:${item.y.toFixed(3)};--tilt:${item.tilt.toFixed(2)}deg">
+            <img class="intro-dome-img" src="${esc(item.src)}" alt="" draggable="false" loading="eager" decoding="async" fetchpriority="low" />
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+
+  const sphere = root.querySelector(".intro-dome-sphere");
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+  // All rotation flows through the RAF loop, never straight from a pointer event, so the
+  // dome redraws once per display frame instead of once per (irregular) pointermove —
+  // that's what makes the drag feel smooth. The pointer handler only sets a *target*
+  // velocity; the loop eases the live velocity toward it. Release and that velocity eases
+  // back to a gentle idle drift, carrying a little momentum. All in deg / deg-per-sec.
+  const IDLE_VEL_Y = -3;      // gentle leftward auto-drift
+  const DRAG_SENS = 0.085;    // deg of rotation per px dragged (lower = calmer drag)
+  const MAX_VEL_Y = 90;       // cap a hard flick so it never spins wildly
+  const MAX_TILT = 3.6;       // subtle fish-eye tilt, not globe wobble
+  const FOLLOW = 18;          // how fast live velocity chases an ACTIVE drag (snappy but smooth)
+  const GRAB_STOP = 4.5;      // gentler chase toward 0 when the pointer is held still — a
+                              // spinning wall glides to rest under the finger, never snaps
+  const RECOVER_IDLE = 1.8;   // momentum decays back to idle drift after release
+  const HOLD_STOP = 70;       // ms without a move → drag target decays to 0 (hold still = stop)
+  const TILT_HOME = 6;        // vertical tilt settles fast
+
+  let rotX = -1.5;
+  let rotY = -12;
+  let velY = IDLE_VEL_Y;
+  let velX = 0;
+  let dragVelY = 0;           // velocity the pointer is currently asking for
+  let dragVelX = 0;
+  let frame = 0;
+  let last = performance.now();
+  let dragging = false;
+  let lastPointer = null;
+  let lastMove = 0;
+
+  const apply = () => {
+    sphere.style.transform = `translateZ(calc(var(--dome-radius) * -1)) rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+  };
+
+  // Fraction of the remaining gap to close this frame for an exponential ease that's
+  // stable regardless of frame rate (dt in seconds).
+  const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
+
+  const tick = (now) => {
+    const dt = Math.min(0.04, (now - last) / 1000);
+    last = now;
+    if (reduce) { frame = requestAnimationFrame(tick); return; }
+    if (dragging) {
+      // A held-still pointer stops sending moves; let the requested velocity bleed to 0
+      // so the dome settles under your finger instead of coasting.
+      if (now - lastMove > HOLD_STOP) { dragVelY = 0; dragVelX = 0; }
+      // Chase an active drag quickly (FOLLOW); but when the target has decayed to 0 — a
+      // grab-and-hold on a spinning wall — ease to the stop gently (GRAB_STOP) so it glides
+      // to rest instead of halting on the spot.
+      const chase = (dragVelY === 0 && dragVelX === 0) ? GRAB_STOP : FOLLOW;
+      velY += (dragVelY - velY) * ease(chase, dt);
+      velX += (dragVelX - velX) * ease(chase, dt);
+    } else {
+      velY += (IDLE_VEL_Y - velY) * ease(RECOVER_IDLE, dt);
+      velX += (0 - velX) * ease(RECOVER_IDLE, dt);
+    }
+    rotY += velY * dt;
+    rotX = clamp(rotX + velX * dt, -MAX_TILT, MAX_TILT);
+    if (!dragging) rotX += (0 - rotX) * ease(TILT_HOME, dt);  // settle back to level
+    apply();
+    frame = requestAnimationFrame(tick);
+  };
+
+  const onPointerDown = (event) => {
+    if (reduce || event.button > 0 || event.target.closest(".intro-cta, [data-action]")) return;
+    event.preventDefault();
+    dragging = true;
+    lastPointer = { x: event.clientX, y: event.clientY };
+    lastMove = performance.now();
+    dragVelY = 0;  // start from rest; a grab-and-hold coasts down to a stop
+    dragVelX = 0;
+    inputTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const onPointerMove = (event) => {
+    if (!dragging || !lastPointer) return;
+    const now = performance.now();
+    const dt = Math.max(8, now - lastMove) / 1000;  // seconds, guarded against tiny/zero
+    const dx = event.clientX - lastPointer.x;
+    const dy = event.clientY - lastPointer.y;
+    lastPointer = { x: event.clientX, y: event.clientY };
+    lastMove = now;
+    // Only set the target velocity; the RAF loop turns it into smooth rotation.
+    dragVelY = clamp((dx * DRAG_SENS) / dt, -MAX_VEL_Y, MAX_VEL_Y);
+    dragVelX = clamp((-dy * DRAG_SENS * 0.22) / dt, -MAX_VEL_Y, MAX_VEL_Y);
+  };
+
+  const onPointerUp = () => {
+    dragging = false;
+    lastPointer = null;
+  };
+
+  apply();
+  if (!reduce) frame = requestAnimationFrame(tick);
+  inputTarget?.addEventListener("pointerdown", onPointerDown);
+  inputTarget?.addEventListener("pointermove", onPointerMove);
+  inputTarget?.addEventListener("pointerup", onPointerUp);
+  inputTarget?.addEventListener("pointercancel", onPointerUp);
+
+  return () => {
+    cancelAnimationFrame(frame);
+    inputTarget?.removeEventListener("pointerdown", onPointerDown);
+    inputTarget?.removeEventListener("pointermove", onPointerMove);
+    inputTarget?.removeEventListener("pointerup", onPointerUp);
+    inputTarget?.removeEventListener("pointercancel", onPointerUp);
+  };
+}
+
 function clearIntroTimers() {
   introTimers.forEach(clearTimeout);
   introTimers = [];
-  if (introMoveTarget && introMoveHandler) {
-    introMoveTarget.removeEventListener("pointermove", introMoveHandler);
-  }
-  introMoveTarget = null;
-  introMoveHandler = null;
+  introDomeCleanup?.();
+  introDomeCleanup = null;
 }
 
 function advanceFromIntro() {
@@ -681,8 +969,8 @@ function advanceFromIntro() {
   go("models");
 }
 
-// Click-out: fly the letters out and fade the CTA / grid / anatomy together, then
-// hand off to models once the exit completes. Reduced motion skips straight across.
+// Click-out: fly the letters out and fade the CTA / dome gallery / anatomy together,
+// then hand off to models once the exit completes. Reduced motion skips straight across.
 function exitIntro() {
   if (state.step !== "intro") {
     return;
