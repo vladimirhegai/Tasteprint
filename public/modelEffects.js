@@ -1,124 +1,114 @@
-// Model-specific background effects for the "Choose your model pair." screen.
+// Small, reliable model background effects for the "Choose your model pair" screen.
 //
-// The model screen splits the colour world (palette custom-properties, handled in
-// app.js + styles.css) from the EFFECT world managed here. Each side of the diagonal
-// gets one `.fx-stage`; this module mounts a canvas effect controller into it, swaps
-// the effect with a 600ms crossfade when the model changes, and tears everything down
-// when the screen is left.
-//
-// Effects are atmospheres behind the cards — calm, restrained, never demo-centerpieces:
-//   gemini → antigravity     : airy suspended particles, a loose ring drifts with the cursor
-//   codex  → faulty-terminal : a low, technical glyph/scanline texture (WebGL port)
-//   claude → metaballs       : soft warm blobs that merge across the whole side (WebGL2)
-//
-// Hard rules honoured: no React, no frameworks, no new deps; canvases never take pointer
-// events and always sit behind the cards (`.model-atmos` is z-index:-1); DPR is capped;
-// loops stop on tab-hide and obey `prefers-reduced-motion`; controllers are destroyed
-// after a crossfade and on screen exit so nothing leaks.
+// This is intentionally a foundation, not a final effects showcase:
+// - one canvas per visible side
+// - no dependencies or build-step rendering libraries
+// - canvases never receive pointer events
+// - animation stops on hidden tabs and in reduced motion
+// - same-model merge runs one full-screen effect
 
-// Every meaningful tuning value lives here, never buried in a render loop. This object
-// is the prompt's recommended starting shape — tune it live in the browser.
 export const MODEL_EFFECT_CONFIG = {
   gemini: {
     type: "antigravity",
     color: "#4F5BD5",
     secondaryColor: "#8B7CFF",
-    countSplit: 340,
-    countMerged: 560,
-    magnetRadiusRatio: 0.18,
-    ringRadiusRatio: 0.075,
-    waveSpeed: 1.4,
-    waveAmplitude: 7,
-    particleSize: 1.15,
-    particleShape: "capsule",
-    particleVariance: 0.55,
-    lerpSpeed: 0.035,
-    cursorSmoothing: 0.08,
-    fieldStrength: 0.78,
-    rotationSpeed: 0.24,
-    depthFactor: 0.85,
-    pulseSpeed: 0.9,
-    autoAnimate: true,
-    idleDelayMs: 1600,
-    opacity: 0.52,
-    dprCap: 1.5
+    countSplit: 220,
+    countMerged: 340,
+    renderScale: 0.72,
+    mobileRenderScale: 0.5,
+    maxCanvasPixels: 560000,
+    // 60fps so the cursor ring tracks smoothly on a 60Hz display (a 30fps cap judders,
+    // same lesson as the metaballs). The batched, allocation-free draw loop keeps the
+    // particle field cheap enough to afford it. followRate/idleRate are the
+    // frame-rate-independent chase rates for the cursor (higher = snappier).
+    fpsCap: 60,
+    followRate: 18,
+    idleRate: 2.4,
+    opacity: 0.46,
+    dprCap: 1.25
   },
-
   codex: {
     type: "faulty-terminal",
-    tint: "#1F9D78",
-    // glyphSet + cellSize are carried from the React Bits demo but are not consumed by
-    // this procedural shader — glyph density comes from scale × gridMul × digitSize.
-    glyphSet: "01{}[]<>/_\\",
-    scale: 1.65,
+    // Port of React Bits' FaultyTerminal (WebGL). Tuned to read as a green CRT glyph
+    // field over the light codex world: alpha is driven by glyph luminance so empty
+    // space stays transparent and the field blends instead of painting a black screen.
+    tint: "#23C28C",
+    scale: 1.7,
+    mergedScale: 2.1,
     gridMul: [2, 1],
-    digitSize: 1.15,
-    cellSize: 18,
-    timeScale: 0.55,
-    fpsCap: 24,
-    scanlineIntensity: 0.16,
-    glitchAmount: 0.34,
-    flickerAmount: 0.18,
-    noiseAmp: 0.32,
-    chromaticAberration: 0,
-    dither: 0.08,
-    curvature: 0.025,
-    mouseReact: true,
-    mouseStrength: 0.42,
-    cursorSmoothing: 0.08,
-    pageLoadAnimation: false,
-    brightness: 0.72,
-    opacity: 0.6,
-    dprCap: 1.5
+    digitSize: 1.3,
+    timeScale: 0.5,
+    scanlineIntensity: 0.5,
+    glitchAmount: 1,
+    flickerAmount: 0.7,
+    noiseAmp: 1.0,
+    curvature: 0.1,
+    mouseStrength: 0.22,
+    brightness: 1.0,
+    renderScale: 0.5,
+    mobileRenderScale: 0.34,
+    maxCanvasPixels: 480000,
+    fpsCap: 30,
+    opacity: 0.5,
+    dprCap: 1.2
   },
-
   claude: {
     type: "metaballs",
     color: "#C97A3D",
     cursorBallColor: "#EBC9A6",
-    ballCountSplit: 16,
-    ballCountMerged: 24,
-    animationSize: 38,
-    cursorBallSize: 3.4,
+    ballCountSplit: 20,
+    ballCountMerged: 30,
+    animationSize: 42,
+    minBallRadius: 1.0,
+    maxBallRadius: 3.0,
+    cursorBallSize: 2.15,
     enableMouseInteraction: true,
     enableTransparency: true,
-    hoverSmoothness: 0.08,
-    clumpFactor: 0.82,
-    speed: 0.22,
-    spreadX: 0.92,
-    spreadY: 0.82,
-    threshold: 2.3,
-    softness: 0.12,
-    opacity: 0.5,
-    dprCap: 1.35
+    // Cursor ball eases toward the pointer every frame (like the reference MetaBalls) for a
+    // smooth trailing follow rather than a snap. fpsCap 60 draws each refresh on a 60Hz
+    // display, so the motion stays fluid instead of juddering at a misaligned 30fps cap.
+    hoverSmoothness: 0.22,
+    idleSmoothness: 0.06,
+    idleDriftRadiusRatio: 0.08,
+    speed: 0.18,
+    spreadX: 1.08,
+    spreadY: 1.0,
+    threshold: 2.85,
+    softness: 0.09,
+    renderScale: 0.62,
+    mobileRenderScale: 0.45,
+    maxCanvasPixels: 620000,
+    fpsCap: 60,
+    opacity: 0.44,
+    dprCap: 1.15
   }
 };
 
-// Effect controllers are keyed by their `type` so the manager can look one up from the
-// effect string the colour world already carries on each model.
 const CONFIG_BY_TYPE = Object.fromEntries(
   Object.values(MODEL_EFFECT_CONFIG).map((config) => [config.type, config])
 );
 
 const reduceMq = window.matchMedia("(prefers-reduced-motion: reduce)");
 const MOBILE_MAX = 860;
-
-/* ---------------- small helpers ---------------- */
+const CROSSFADE_MS = 360;
 
 function clamp(value, min, max) {
-  return value < min ? min : value > max ? max : value;
+  return Math.max(min, Math.min(max, value));
 }
 
-function hexToRgb255(hex) {
+function isMobile() {
+  return window.innerWidth <= MOBILE_MAX;
+}
+
+function hexToRgb(hex) {
   let h = String(hex || "").replace("#", "").trim();
-  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-  const n = parseInt(h || "000000", 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  if (h.length === 3) h = h.split("").map((char) => char + char).join("");
+  const value = parseInt(h || "000000", 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
-function hexToRgb01(hex) {
-  const [r, g, b] = hexToRgb255(hex);
-  return [r / 255, g / 255, b / 255];
+function rgba(rgb, alpha) {
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
 }
 
 function mixRgb(a, b, t) {
@@ -129,12 +119,9 @@ function mixRgb(a, b, t) {
   ];
 }
 
-// Deterministic PRNG so the initial particle/ball layout is reproducible (dev:local
-// must stay deterministic). Animation over time is still wall-clock driven.
 function mulberry32(seed) {
   let a = seed >>> 0;
-  return function () {
-    a |= 0;
+  return function next() {
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
@@ -142,415 +129,386 @@ function mulberry32(seed) {
   };
 }
 
-function isMobile() {
-  return window.innerWidth <= MOBILE_MAX;
+function hash2(a, b, seed = 0) {
+  let h = Math.imul(a + 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + seed, 0xc2b2ae35);
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x27d4eb2d);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967295;
 }
 
-function compileShader(gl, type, source) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.warn("modelEffects: shader compile failed", gl.getShaderInfoLog(shader));
-    gl.deleteShader(shader);
-    return null;
-  }
-  return shader;
+function afterPaint(callback) {
+  requestAnimationFrame(() => setTimeout(callback, 0));
 }
 
-function linkProgram(gl, vertexSrc, fragmentSrc) {
-  const vs = compileShader(gl, gl.VERTEX_SHADER, vertexSrc);
-  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSrc);
-  if (!vs || !fs) return null;
-  const program = gl.createProgram();
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.bindAttribLocation(program, 0, "position");
-  gl.linkProgram(program);
-  gl.deleteShader(vs);
-  gl.deleteShader(fs);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    console.warn("modelEffects: program link failed", gl.getProgramInfoLog(program));
-    return null;
-  }
-  return program;
-}
-
-// A full-screen triangle (covers clip space with one primitive). vUv is derived from the
-// position in the vertex shader, so only one attribute (location 0) is needed.
-function makeFullscreenTriangle(gl) {
-  const buffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  return buffer;
-}
-
-/* ---------------- base controller ----------------
-   Owns the canvas, sizing (capped DPR), the RAF loop, and the four gates every effect
-   shares: ResizeObserver, prefers-reduced-motion, document visibility, and a virtual
-   pointer. Subclasses implement onSetup / onResize / onFrame / onStatic / onDestroy. */
-class EffectController {
+class CanvasEffect {
   constructor(host, config, { merged = false, side = "primary" } = {}) {
     this.host = host;
     this.config = config;
     this.merged = merged;
     this.side = side;
-    this.dprCap = config.dprCap || 1.5;
-    this.fpsCap = config.fpsCap || 0;
-
-    this.live = false;
     this.destroyed = false;
-    this.setupDone = false;
+    this.running = false;
+    this.ready = false;
     this.raf = 0;
     this.lastFrame = 0;
     this.lastDraw = 0;
     this.width = 0;
     this.height = 0;
-    this.dpr = 1;
-    this.rect = { left: 0, top: 0, width: 0, height: 0 };
-
-    // Virtual pointer (host-relative px + normalised), driven from window pointermove —
-    // the canvas itself can't receive events (pointer-events: none).
-    this.pointer = { x: 0, y: 0 };
-    this.pointerNorm = { x: 0.5, y: 0.5 };
-    this.lastPointerMove = -Infinity;
+    this.pixelRatio = 1;
+    this.pointerInside = false;
+    this.hasPointer = false;
+    this.pointer = { x: 0.5, y: 0.5 };
+    this.pointerPx = { x: 0, y: 0 };
+    this.lastClient = null;
 
     this.canvas = document.createElement("canvas");
     this.canvas.className = "fx-canvas";
+    this.canvas.style.pointerEvents = "none";
+    this.ctx = this.constructor.canvasContext === "custom"
+      ? null
+      : this.canvas.getContext("2d", { alpha: true });
     host.appendChild(this.canvas);
 
     this._tick = this._tick.bind(this);
-    this._onResize = () => this._resize();
-    this._onVisibility = () => this._evaluate();
-    this._onReduce = () => this._evaluate();
+    this._onResize = () => this.resize();
     this._onPointer = (event) => this._handlePointer(event);
+    this._onVisibility = () => this._syncLoop();
+    this._onReduce = () => this._syncLoop();
 
-    this.observer = new ResizeObserver(this._onResize);
-    this.observer.observe(host);
-    document.addEventListener("visibilitychange", this._onVisibility);
+    this.resizeObserver = new ResizeObserver(this._onResize);
+    this.resizeObserver.observe(host);
     window.addEventListener("pointermove", this._onPointer, { passive: true });
+    document.addEventListener("visibilitychange", this._onVisibility);
     if (reduceMq.addEventListener) reduceMq.addEventListener("change", this._onReduce);
-    else if (reduceMq.addListener) reduceMq.addListener(this._onReduce);
-  }
-
-  get reduced() {
-    return reduceMq.matches;
+    else reduceMq.addListener(this._onReduce);
   }
 
   start() {
     if (this.destroyed) return;
-    this.live = true;
-    this._resize();
+    this.running = true;
+    this.resize();
+    this.setup();
+    this.ready = true;
+    this.renderStaticFrame();
+    this._syncLoop();
   }
 
   stop() {
-    this.live = false;
-    if (this.raf) {
-      cancelAnimationFrame(this.raf);
-      this.raf = 0;
-    }
-  }
-
-  resize() {
-    this._resize();
-  }
-
-  renderStaticFrame() {
-    if (!this.setupDone || this.width === 0) return;
-    this.onStatic();
+    this.running = false;
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
   }
 
   destroy() {
     if (this.destroyed) return;
+    this.stop();
     this.destroyed = true;
-    this.live = false;
-    if (this.raf) {
-      cancelAnimationFrame(this.raf);
-      this.raf = 0;
-    }
-    this.observer.disconnect();
-    document.removeEventListener("visibilitychange", this._onVisibility);
+    this.resizeObserver.disconnect();
     window.removeEventListener("pointermove", this._onPointer);
+    document.removeEventListener("visibilitychange", this._onVisibility);
     if (reduceMq.removeEventListener) reduceMq.removeEventListener("change", this._onReduce);
-    else if (reduceMq.removeListener) reduceMq.removeListener(this._onReduce);
-    try {
-      this.onDestroy();
-    } finally {
-      if (this.canvas.parentElement) this.canvas.remove();
-    }
+    else reduceMq.removeListener(this._onReduce);
+    this.teardown();
+    this.canvas.remove();
   }
 
-  _handlePointer(event) {
-    const rect = this.rect;
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    this.pointer.x = x;
-    this.pointer.y = y;
-    this.pointerNorm.x = clamp(x / (rect.width || 1), 0, 1);
-    this.pointerNorm.y = clamp(y / (rect.height || 1), 0, 1);
-    this.lastPointerMove = performance.now();
-  }
-
-  _resize() {
+  resize() {
     if (this.destroyed) return;
     const rect = this.host.getBoundingClientRect();
     this.rect = rect;
-    const w = Math.round(rect.width);
-    const h = Math.round(rect.height);
-    if (w <= 0 || h <= 0) {
-      this.width = 0;
-      this.height = 0;
-      this._evaluate();
-      return;
+    const cssW = Math.max(1, Math.round(rect.width));
+    const cssH = Math.max(1, Math.round(rect.height));
+    const scale = isMobile()
+      ? (this.config.mobileRenderScale || this.config.renderScale || 1)
+      : (this.config.renderScale || 1);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.config.dprCap || 1);
+    let ratio = Math.min(dpr * scale, 1);
+    let pixelW = Math.max(1, Math.round(cssW * ratio));
+    let pixelH = Math.max(1, Math.round(cssH * ratio));
+    const maxPixels = this.config.maxCanvasPixels || Infinity;
+    const pixels = pixelW * pixelH;
+
+    if (pixels > maxPixels) {
+      const down = Math.sqrt(maxPixels / pixels);
+      pixelW = Math.max(1, Math.round(pixelW * down));
+      pixelH = Math.max(1, Math.round(pixelH * down));
+      ratio *= down;
     }
-    let dpr = Math.min(window.devicePixelRatio || 1, this.dprCap);
-    if (isMobile()) dpr = Math.min(dpr, 1.2);
-    this.width = w;
-    this.height = h;
-    this.dpr = dpr;
-    this.canvas.width = Math.max(1, Math.round(w * dpr));
-    this.canvas.height = Math.max(1, Math.round(h * dpr));
+
+    this.width = cssW;
+    this.height = cssH;
+    this.pixelRatio = ratio;
+    this.canvas.width = pixelW;
+    this.canvas.height = pixelH;
     this.canvas.style.width = "100%";
     this.canvas.style.height = "100%";
-    if (!this.setupDone) {
-      this.setupDone = this.onSetup() !== false;
+
+    if (this.lastClient) {
+      this._syncPointer(this.lastClient.x, this.lastClient.y);
+    } else {
+      this.pointerPx.x = cssW * 0.5;
+      this.pointerPx.y = cssH * 0.5;
     }
-    if (this.setupDone) this.onResize();
-    this._evaluate();
+
+    if (this.ready) {
+      this.onResize();
+      this.renderStaticFrame();
+    }
   }
 
-  // Single source of truth for whether the RAF loop should be running. Called on start,
-  // resize, visibility change, and reduced-motion change.
-  _evaluate() {
-    if (this.destroyed || !this.live) return;
-    const shouldLoop = !this.reduced && !document.hidden && this.width > 0 && this.setupDone;
-    if (shouldLoop && !this.raf) {
+  renderStaticFrame() {
+    if (!this.ctx || this.width <= 1 || this.height <= 1) return;
+    this.draw(1 / 30, performance.now(), true);
+  }
+
+  setup() {}
+  onResize() {}
+  teardown() {}
+
+  _handlePointer(event) {
+    this.lastClient = { x: event.clientX, y: event.clientY };
+    this._syncPointer(event.clientX, event.clientY);
+  }
+
+  _syncPointer(clientX, clientY) {
+    const rect = this.rect || this.host.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const inside = x >= 0 && x <= rect.width && y >= 0 && y <= rect.height;
+    this.pointerInside = inside;
+    if (!inside) return;
+    this.hasPointer = true;
+    this.pointer.x = clamp(x / Math.max(1, rect.width), 0, 1);
+    this.pointer.y = clamp(y / Math.max(1, rect.height), 0, 1);
+    this.pointerPx.x = this.pointer.x * this.width;
+    this.pointerPx.y = this.pointer.y * this.height;
+  }
+
+  _syncLoop() {
+    if (!this.running || this.destroyed || document.hidden || reduceMq.matches) {
+      if (this.raf) cancelAnimationFrame(this.raf);
+      this.raf = 0;
+      if (!document.hidden) this.renderStaticFrame();
+      return;
+    }
+    if (!this.raf) {
       this.lastFrame = performance.now();
       this.raf = requestAnimationFrame(this._tick);
-    } else if (!shouldLoop && this.raf) {
-      cancelAnimationFrame(this.raf);
-      this.raf = 0;
-    }
-    // Reduced motion / resumed-while-paused: paint a single static frame so the field
-    // never sits blank, but do not spin a loop.
-    if (!shouldLoop && this.reduced && !document.hidden && this.setupDone && this.width > 0) {
-      this.onStatic();
     }
   }
 
   _tick(now) {
-    if (!this.live || this.reduced || document.hidden || this.destroyed) {
-      this.raf = 0;
+    this.raf = 0;
+    if (!this.running || this.destroyed || document.hidden || reduceMq.matches) return;
+
+    const minDelta = this.config.fpsCap ? 1000 / this.config.fpsCap : 0;
+    if (minDelta && now - this.lastDraw < minDelta) {
+      this.raf = requestAnimationFrame(this._tick);
       return;
     }
-    this.raf = requestAnimationFrame(this._tick);
-    if (!this.setupDone || this.width === 0) return;
+
     let dt = (now - this.lastFrame) / 1000;
     this.lastFrame = now;
-    if (dt > 0.05) dt = 0.05;
-    if (dt < 0) dt = 0;
-    if (this.fpsCap) {
-      const minDelta = 1000 / this.fpsCap;
-      if (now - this.lastDraw < minDelta) return;
-      this.lastDraw = now;
-    }
-    this.onFrame(dt, now);
+    this.lastDraw = now;
+    dt = clamp(dt, 0, 0.05);
+    this.draw(dt, now, false);
+    this.raf = requestAnimationFrame(this._tick);
   }
 
-  // True when the pointer has been still long enough to hand over to idle motion.
-  isIdle(now, delayMs) {
-    return now - this.lastPointerMove > delayMs;
+  clear() {
+    const ctx = this.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
   }
 
-  /* eslint-disable class-methods-use-this */
-  onSetup() {}
-  onResize() {}
-  onFrame() {}
-  onStatic() {}
-  onDestroy() {}
-  /* eslint-enable class-methods-use-this */
+  draw() {}
 }
 
-/* ---------------- Gemini: Antigravity (Canvas 2D) ----------------
-   Many small suspended particles drift in place as faint dust; those near the virtual
-   cursor are pulled into a loose, wavering ring and brighten. The cursor is smoothed and,
-   when the pointer goes quiet, wanders on its own (auto-animate). Airy, not a starfield. */
-class AntigravityEffect extends EffectController {
-  onSetup() {
-    this.ctx = this.canvas.getContext("2d");
-    if (!this.ctx) return false;
+// Shared so a re-mount (model swapped away and back, or a merge that rebuilds the side)
+// resumes the drift phase and keeps the cursor where it was instead of snapping the
+// field to t=0 with the ring jumping to the centre. Cursor is stored normalised so it
+// survives a resize. Mirrors META_EPOCH / META_CURSOR_BY_SIDE.
+const GEMINI_EPOCH = (typeof performance !== "undefined" ? performance.now() : Date.now());
+const GEMINI_CURSOR_BY_SIDE = { primary: null, secondary: null };
 
-    const cfg = this.config;
-    const rng = mulberry32(this.side === "primary" ? 0x9e37 : 0x85eb);
-    const count = this._count();
-    this.particles = [];
-    for (let i = 0; i < count; i += 1) {
-      this.particles.push({
-        hx: rng(),
-        hy: rng(),
-        z: rng() * 2 - 1,
-        t: rng() * Math.PI * 2,
-        speed: 0.4 + rng() * 0.8,
-        radiusOffset: rng() * 2 - 1,
-        size: 0.6 + rng() * 0.8,
-        drift: rng() * Math.PI * 2,
-        tone: rng(),
-        cx: 0,
-        cy: 0,
-        init: false
-      });
+class GeminiEffect extends CanvasEffect {
+  setup() {
+    this.colorA = hexToRgb(this.config.color);
+    this.colorB = hexToRgb(this.config.secondaryColor);
+    this.baseAlpha = 0.24;
+    // Phase to a shared wall clock so a fresh instance picks up where a continuously
+    // running one would be (this.time += dt accumulates real seconds).
+    this.time = (performance.now() - GEMINI_EPOCH) / 1000;
+
+    const persisted = GEMINI_CURSOR_BY_SIDE[this.side];
+    this.cursor = persisted
+      ? { x: persisted.fx * this.width, y: persisted.fy * this.height }
+      : { x: this.width * 0.5, y: this.height * 0.5 };
+
+    // Opaque colour ramp — independent of particle count, so it's built once here.
+    const STEPS = 16;
+    this.palette = new Array(STEPS);
+    for (let i = 0; i < STEPS; i += 1) {
+      this.palette[i] = rgba(mixRgb(this.colorA, this.colorB, i / (STEPS - 1)), 1);
     }
-    this.colorA = hexToRgb255(cfg.color);
-    this.colorB = hexToRgb255(cfg.secondaryColor);
-    this.virt = { x: 0, y: 0, init: false };
-    this.time = 0;
-    return true;
+
+    this.active = []; // reused scratch list, length tracked per frame via activeCount
+    this._buildParticles();
   }
 
-  _count() {
-    let count = this.merged ? this.config.countMerged : this.config.countSplit;
-    if (isMobile()) count = Math.round(count * 0.5);
-    return count;
+  _buildParticles() {
+    const rng = mulberry32(this.side === "primary" ? 0x4f5bd5 : 0x8b7cff);
+    const count = this.merged ? this.config.countMerged : this.config.countSplit;
+    const STEPS = this.palette.length;
+
+    this.particles = Array.from({ length: isMobile() ? Math.round(count * 0.6) : count }, () => ({
+      x: rng(),
+      y: rng(),
+      phase: rng() * Math.PI * 2,
+      speed: 0.4 + rng() * 0.8,
+      size: 0.7 + rng() * 1.1,
+      tone: rng(),
+      bucket: 0,
+      // Scratch slots reused each frame for particles caught in the cursor field — keeps
+      // the object shape stable so the draw loop allocates nothing.
+      _dx: 0,
+      _dy: 0,
+      _dist: 0
+    }));
+
+    // Bucket each particle by its static tone so the ambient field draws in one fill per
+    // bucket (alpha rides ctx.globalAlpha) instead of a per-particle colour string + fill.
+    this.buckets = Array.from({ length: STEPS }, () => []);
+    for (const p of this.particles) {
+      p.bucket = clamp(Math.round(p.tone * (STEPS - 1)), 0, STEPS - 1);
+      this.buckets[p.bucket].push(p);
+    }
   }
 
-  _draw(dt, now, isStatic) {
+  draw(dt, now, still) {
+    this.clear();
     const ctx = this.ctx;
     const cfg = this.config;
     const w = this.width;
     const h = this.height;
-    if (!isStatic) this.time += dt;
-    const time = this.time;
-    const minDim = Math.min(w, h);
-    const magnetR = cfg.magnetRadiusRatio * minDim;
-    const ringR = cfg.ringRadiusRatio * minDim;
-    const driftAmp = minDim * 0.012;
+    const min = Math.min(w, h);
+    if (!still) this.time += dt;
 
-    // Virtual cursor target: the live pointer, or an idle Lissajous wander.
-    let targetX;
-    let targetY;
-    if (isStatic) {
-      targetX = w * 0.5;
-      targetY = h * 0.5;
-    } else if (cfg.autoAnimate && this.isIdle(now, cfg.idleDelayMs)) {
-      targetX = w * 0.5 + Math.sin(time * 0.5) * w * 0.25;
-      targetY = h * 0.5 + Math.cos(time * 0.9) * h * 0.22;
-    } else {
-      targetX = this.pointer.x;
-      targetY = this.pointer.y;
-    }
-    if (!this.virt.init || isStatic) {
-      this.virt.x = targetX;
-      this.virt.y = targetY;
-      this.virt.init = true;
-    }
-    this.virt.x += (targetX - this.virt.x) * cfg.cursorSmoothing;
-    this.virt.y += (targetY - this.virt.y) * cfg.cursorSmoothing;
-    const cx = this.virt.x;
-    const cy = this.virt.y;
-    const rot = time * cfg.rotationSpeed;
-    // Frame-rate independent approach factor for the lerp toward the ring/home.
-    const k = isStatic ? 1 : 1 - Math.exp(-cfg.lerpSpeed * 60 * dt);
+    // Frame-rate-independent cursor follow: a snappy chase toward the pointer, easing back
+    // to the idle drift when it leaves. A fixed per-frame factor (the old `* 0.08`) felt
+    // laggy and tracked the display only at the old 30fps cap; this stays smooth at 60.
+    const targetX = this.pointerInside ? this.pointerPx.x : w * (0.5 + Math.sin(this.time * 0.34) * 0.2);
+    const targetY = this.pointerInside ? this.pointerPx.y : h * (0.5 + Math.cos(this.time * 0.27) * 0.16);
+    const rate = this.pointerInside ? (cfg.followRate ?? 18) : (cfg.idleRate ?? 2.4);
+    const k = 1 - Math.exp(-rate * dt);
+    this.cursor.x += (targetX - this.cursor.x) * k;
+    this.cursor.y += (targetY - this.cursor.y) * k;
 
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    ctx.lineCap = "round";
+    const cx = this.cursor.x;
+    const cy = this.cursor.y;
+    const ringRadius = min * 0.08;
+    const fieldRadius = min * 0.22;
+    const fieldSq = fieldRadius * fieldRadius;
+    const drift = min * 0.012;
+    const sizeScale = min * 0.0034;
+    const t = this.time;
+    const TWO_PI = Math.PI * 2;
 
-    for (const p of this.particles) {
-      if (!isStatic) p.t += p.speed * dt;
-      const homeX = p.hx * w + Math.sin(time * 0.25 + p.drift) * driftAmp;
-      const homeY = p.hy * h + Math.cos(time * 0.22 + p.drift) * driftAmp;
-
-      const dx = homeX - cx;
-      const dy = homeY - cy;
-      const dist = Math.hypot(dx, dy);
-      let tx = homeX;
-      let ty = homeY;
-      if (dist < magnetR) {
-        const angle = Math.atan2(dy, dx) + rot;
-        const wave = Math.sin(p.t * cfg.waveSpeed + angle) * (0.5 * cfg.waveAmplitude);
-        const deviation = p.radiusOffset * ((minDim * 0.02) / (cfg.fieldStrength + 0.1));
-        const cur = ringR + wave + deviation;
-        tx = cx + cur * Math.cos(angle);
-        ty = cy + cur * Math.sin(angle);
+    // Pass 1 — ambient field, batched by colour bucket (one fillStyle + one fill each).
+    // Particles swept inside the cursor field are deferred to pass 2 (brighter, larger).
+    let activeCount = 0;
+    ctx.globalAlpha = this.baseAlpha;
+    for (let b = 0; b < this.buckets.length; b += 1) {
+      const bucket = this.buckets[b];
+      if (!bucket.length) continue;
+      ctx.fillStyle = this.palette[b];
+      ctx.beginPath();
+      let drew = false;
+      for (let i = 0; i < bucket.length; i += 1) {
+        const p = bucket[i];
+        const homeX = p.x * w + Math.sin(t * 0.18 + p.phase) * drift;
+        const homeY = p.y * h + Math.cos(t * 0.16 + p.phase) * drift;
+        const dx = homeX - cx;
+        const dy = homeY - cy;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < fieldSq) {
+          p._dx = dx;
+          p._dy = dy;
+          p._dist = Math.sqrt(distSq);
+          this.active[activeCount] = p;
+          activeCount += 1;
+          continue;
+        }
+        const r = Math.max(0.8, p.size * sizeScale);
+        ctx.moveTo(homeX + r, homeY);
+        ctx.arc(homeX, homeY, r, 0, TWO_PI);
+        drew = true;
       }
-      if (!p.init) {
-        p.cx = tx;
-        p.cy = ty;
-        p.init = true;
-      }
-      p.cx += (tx - p.cx) * k;
-      p.cy += (ty - p.cy) * k;
-
-      const distToCursor = Math.hypot(p.cx - cx, p.cy - cy);
-      const ringFactor = clamp(1 - Math.abs(distToCursor - ringR) / (ringR * 1.6), 0, 1);
-      const pulse = 0.8 + Math.sin(p.t * cfg.pulseSpeed) * 0.2 * cfg.particleVariance;
-      const depth = 0.7 + (p.z * 0.5 + 0.5) * 0.5;
-      const radius = cfg.particleSize * p.size * (minDim * 0.0055) * depth * (0.6 + 0.8 * ringFactor) * pulse;
-      if (radius < 0.35) continue;
-      const alpha = (0.34 + 0.55 * ringFactor) * depth;
-      const tone = clamp(p.tone * 0.6 + ringFactor * 0.5, 0, 1);
-      const col = mixRgb(this.colorA, this.colorB, tone);
-      ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${alpha.toFixed(3)})`;
-
-      if (cfg.particleShape === "capsule" && radius > 0.7 && !isMobile()) {
-        const dir = Math.atan2(p.cy - cy, p.cx - cx);
-        const len = radius * 1.7;
-        ctx.save();
-        ctx.translate(p.cx, p.cy);
-        ctx.rotate(dir);
-        ctx.lineWidth = radius * 1.05;
-        ctx.strokeStyle = ctx.fillStyle;
-        ctx.beginPath();
-        ctx.moveTo(-len / 2, 0);
-        ctx.lineTo(len / 2, 0);
-        ctx.stroke();
-        ctx.restore();
-      } else {
-        ctx.beginPath();
-        ctx.arc(p.cx, p.cy, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      if (drew) ctx.fill();
     }
-  }
 
-  onFrame(dt, now) {
-    this._draw(dt, now, false);
-  }
+    // Pass 2 — particles caught in the cursor ring. Few of them, so colour is quantised to
+    // the ramp and alpha rides globalAlpha; this stays allocation-free too.
+    const lastStep = this.palette.length - 1;
+    for (let i = 0; i < activeCount; i += 1) {
+      const p = this.active[i];
+      const pull = 1 - p._dist / fieldRadius;
+      const angle = Math.atan2(p._dy, p._dx) + t * 0.18;
+      const rx = ringRadius + Math.sin(t * p.speed + p.phase) * drift;
+      const ry = ringRadius + Math.cos(t * p.speed + p.phase) * drift;
+      const x = cx + Math.cos(angle) * rx;
+      const y = cy + Math.sin(angle) * ry;
+      const r = Math.max(0.8, p.size * sizeScale * (1 + pull * 0.8));
+      const ci = clamp(Math.round((p.tone + pull * 0.35) * lastStep), 0, lastStep);
+      ctx.globalAlpha = this.baseAlpha + pull * 0.5;
+      ctx.fillStyle = this.palette[ci];
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TWO_PI);
+      ctx.fill();
+    }
 
-  onStatic() {
-    this._draw(0, performance.now(), true);
-  }
+    ctx.globalAlpha = 1;
 
-  onDestroy() {
-    this.particles = null;
-    this.ctx = null;
+    // Persist the cursor (normalised) so a re-mount resumes from here instead of the
+    // centre. Mutated in place — one allocation on the first frame, none after.
+    let store = GEMINI_CURSOR_BY_SIDE[this.side];
+    if (!store) store = GEMINI_CURSOR_BY_SIDE[this.side] = { fx: 0.5, fy: 0.5 };
+    store.fx = this.cursor.x / Math.max(1, w);
+    store.fy = this.cursor.y / Math.max(1, h);
   }
 }
 
-/* ---------------- Codex: Faulty Terminal (WebGL) ----------------
-   A raw-WebGL port of the React Bits FaultyTerminal shader (no ogl). The fragment is the
-   original GLSL with one change: it outputs luminance as alpha so the green glyph texture
-   composites over the field behind it instead of painting a black panel. Frame-capped and
-   kept dim so the cards stay dominant. Falls back to a faint static dot grid (2D) if WebGL
-   is unavailable. */
-const TERMINAL_VERT = `
-attribute vec2 position;
+// ---- Faulty terminal (Codex) ----
+// A vanilla/WebGL port of React Bits' FaultyTerminal. A full-screen triangle runs a
+// fragment shader that builds a drifting fbm field, samples it into a 5x5 dot-matrix
+// glyph grid, and adds rolling scanlines, glitch displacement, flicker, and barrel
+// curvature. Output alpha = glyph luminance, so the field blends over the light codex
+// world (transparent where dark) instead of painting an opaque black screen.
+const FAULTY_VERTEX = `
+attribute vec2 aPosition;
 varying vec2 vUv;
+
 void main() {
-  vUv = position * 0.5 + 0.5;
-  gl_Position = vec4(position, 0.0, 1.0);
+  vUv = aPosition * 0.5 + 0.5;
+  gl_Position = vec4(aPosition, 0.0, 1.0);
 }
 `;
 
-const TERMINAL_FRAG = `
+// PERFORMANCE: the reference shader calls the fbm-heavy pattern()/digit() ten times per
+// pixel (the center glyph + a 3x3 bloom). All ten taps land in the same grid cell, so
+// the costly fbm field (pattern -> 5x fbm -> 15x noise) is computed ONCE per cell here
+// (cellIntensity) and the nine bloom taps only re-run the cheap glyph bitmap (glyph),
+// reusing that intensity. That is a ~10x cut in transcendental work — the change that
+// keeps this affordable next to the metaballs effect on the other half of the screen.
+// Chromatic aberration, dithering, and the page-load fade are dropped (unused here).
+const FAULTY_FRAGMENT = `
 precision mediump float;
 
 varying vec2 vUv;
 
 uniform float iTime;
-uniform vec3  iResolution;
 uniform float uScale;
 uniform vec2  uGridMul;
 uniform float uDigitSize;
@@ -558,8 +516,6 @@ uniform float uScanlineIntensity;
 uniform float uGlitchAmount;
 uniform float uFlickerAmount;
 uniform float uNoiseAmp;
-uniform float uChromaticAberration;
-uniform float uDither;
 uniform float uCurvature;
 uniform vec3  uTint;
 uniform vec2  uMouse;
@@ -569,23 +525,17 @@ uniform float uBrightness;
 
 float time;
 
-float hash21(vec2 p){
-  p = fract(p * 234.56);
-  p += dot(p, p + 34.56);
-  return fract(p.x * p.y);
-}
-
-float noise(vec2 p){
+float noise(vec2 p) {
   return sin(p.x * 10.0) * sin(p.y * (3.0 + sin(time * 0.090909))) + 0.2;
 }
 
-mat2 rotate(float angle){
+mat2 rotate(float angle) {
   float c = cos(angle);
   float s = sin(angle);
   return mat2(c, -s, s, c);
 }
 
-float fbm(vec2 p){
+float fbm(vec2 p) {
   p *= 1.1;
   float f = 0.0;
   float amp = 0.5 * uNoiseAmp;
@@ -602,7 +552,7 @@ float fbm(vec2 p){
   return f;
 }
 
-float pattern(vec2 p, out vec2 q, out vec2 r){
+float pattern(vec2 p, out vec2 q, out vec2 r) {
   vec2 offset1 = vec2(1.0);
   vec2 offset0 = vec2(0.0);
   mat2 rot01 = rotate(0.1 * time);
@@ -612,583 +562,744 @@ float pattern(vec2 p, out vec2 q, out vec2 r){
   return fbm(p + r);
 }
 
-float digit(vec2 p){
-  vec2 grid = uGridMul * 15.0;
-  vec2 s = floor(p * grid) / grid;
-  p = p * grid;
+// Expensive: the drifting field intensity for one grid cell. Run once per pixel.
+float cellIntensity(vec2 s) {
   vec2 q, r;
   float intensity = pattern(s * 0.1, q, r) * 1.3 - 0.03;
-
-  if(uUseMouse > 0.5){
+  if (uUseMouse > 0.5) {
     vec2 mouseWorld = uMouse * uScale;
     float distToMouse = distance(s, mouseWorld);
     float mouseInfluence = exp(-distToMouse * 8.0) * uMouseStrength * 10.0;
     intensity += mouseInfluence;
-    float ripple = sin(distToMouse * 20.0 - iTime * 5.0) * 0.1 * mouseInfluence;
-    intensity += ripple;
+    intensity += sin(distToMouse * 20.0 - iTime * 5.0) * 0.1 * mouseInfluence;
   }
+  return intensity;
+}
 
-  p = fract(p);
+// Cheap: the 5x5 dot-matrix glyph bitmap, given a precomputed cell intensity.
+float glyph(vec2 p, float intensity) {
+  vec2 grid = uGridMul * 15.0;
+  p = fract(p * grid);
   p *= uDigitSize;
-
   float px5 = p.x * 5.0;
   float py5 = (1.0 - p.y) * 5.0;
   float x = fract(px5);
   float y = fract(py5);
-
   float i = floor(py5) - 2.0;
   float j = floor(px5) - 2.0;
   float n = i * i + j * j;
   float f = n * 0.0625;
-
   float isOn = step(0.1, intensity - f);
-  float br = isOn * (0.2 + y * 0.8) * (0.75 + x * 0.25);
-  return step(0.0, p.x) * step(p.x, 1.0) * step(0.0, p.y) * step(p.y, 1.0) * br;
+  float bright = isOn * (0.2 + y * 0.8) * (0.75 + x * 0.25);
+  return step(0.0, p.x) * step(p.x, 1.0) * step(0.0, p.y) * step(p.y, 1.0) * bright;
 }
 
-float onOff(float a, float b, float c){
+float onOff(float a, float b, float c) {
   return step(c, sin(iTime + a * cos(iTime * b))) * uFlickerAmount;
 }
 
-float displace(vec2 look){
+float displace(vec2 look) {
   float y = look.y - mod(iTime * 0.25, 1.0);
   float window = 1.0 / (1.0 + 50.0 * y * y);
   return sin(look.y * 20.0 + iTime) * 0.0125 * onOff(4.0, 2.0, 0.8) * (1.0 + cos(iTime * 60.0)) * window;
 }
 
-vec3 getColor(vec2 p){
-  float bar = step(mod(p.y + time * 20.0, 1.0), 0.2) * 0.4 + 1.0;
-  bar *= uScanlineIntensity;
+float field(vec2 p) {
+  float bar = (step(mod(p.y + time * 20.0, 1.0), 0.2) * 0.4 + 1.0) * uScanlineIntensity;
 
   float displacement = displace(p);
   p.x += displacement;
-
   if (uGlitchAmount != 1.0) {
-    float extra = displacement * (uGlitchAmount - 1.0);
-    p.x += extra;
+    p.x += displacement * (uGlitchAmount - 1.0);
   }
 
-  float middle = digit(p);
+  vec2 grid = uGridMul * 15.0;
+  vec2 s = floor(p * grid) / grid;
+  float intensity = cellIntensity(s);
+
+  float middle = glyph(p, intensity);
   const float off = 0.002;
-  float sum = digit(p + vec2(-off, -off)) + digit(p + vec2(0.0, -off)) + digit(p + vec2(off, -off)) +
-              digit(p + vec2(-off, 0.0)) + digit(p + vec2(0.0, 0.0)) + digit(p + vec2(off, 0.0)) +
-              digit(p + vec2(-off, off)) + digit(p + vec2(0.0, off)) + digit(p + vec2(off, off));
-  vec3 baseColor = vec3(0.9) * middle + sum * 0.1 * vec3(1.0) * bar;
-  return baseColor;
+  float sum = glyph(p + vec2(-off, -off), intensity) + glyph(p + vec2(0.0, -off), intensity) + glyph(p + vec2(off, -off), intensity) +
+              glyph(p + vec2(-off, 0.0), intensity) + glyph(p + vec2(0.0, 0.0), intensity) + glyph(p + vec2(off, 0.0), intensity) +
+              glyph(p + vec2(-off, off), intensity) + glyph(p + vec2(0.0, off), intensity) + glyph(p + vec2(off, off), intensity);
+
+  return 0.9 * middle + sum * 0.1 * bar;
 }
 
-vec2 barrel(vec2 uv){
+vec2 barrel(vec2 uv) {
   vec2 c = uv * 2.0 - 1.0;
   float r2 = dot(c, c);
   c *= 1.0 + uCurvature * r2;
   return c * 0.5 + 0.5;
 }
 
-void main(){
+void main() {
   time = iTime * 0.333333;
   vec2 uv = vUv;
-  if(uCurvature != 0.0){
-    uv = barrel(uv);
-  }
+  if (uCurvature != 0.0) uv = barrel(uv);
+
   vec2 p = uv * uScale;
-  vec3 col = getColor(p);
+  float g = field(p);
 
-  if(uChromaticAberration != 0.0){
-    vec2 ca = vec2(uChromaticAberration) / iResolution.xy;
-    col.r = getColor(p + ca).r;
-    col.b = getColor(p - ca).b;
-  }
-
-  col *= uTint;
-  col *= uBrightness;
-
-  if(uDither > 0.0){
-    float rnd = hash21(gl_FragCoord.xy);
-    col += (rnd - 0.5) * (uDither * 0.003922);
-  }
-
-  // Transparent integration: dark cells drop out, glyphs carry alpha so the field shows
-  // through. This is what keeps it a texture, not a black terminal panel.
-  float a = clamp(max(col.r, max(col.g, col.b)) * 1.5, 0.0, 1.0);
-  gl_FragColor = vec4(col, a);
+  float alpha = clamp(g * uBrightness, 0.0, 1.0);
+  // Hot cells lean toward a pale phosphor green; everything else holds the tint.
+  vec3 color = mix(uTint, vec3(0.85, 1.0, 0.92), clamp((g - 0.7) * 1.6, 0.0, 0.55));
+  gl_FragColor = vec4(color, alpha);
 }
 `;
 
-class FaultyTerminalEffect extends EffectController {
-  onSetup() {
-    const gl =
-      this.canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false, antialias: false }) ||
-      this.canvas.getContext("experimental-webgl", { alpha: true, premultipliedAlpha: false });
-    if (!gl) {
-      this.fallback = true;
-      this.ctx2d = this.canvas.getContext("2d");
-      this.tintRgb = hexToRgb255(this.config.tint);
-      return Boolean(this.ctx2d);
-    }
-    this.gl = gl;
-    const program = linkProgram(gl, TERMINAL_VERT, TERMINAL_FRAG);
-    if (!program) {
-      this.fallback = true;
-      return true;
-    }
-    this.program = program;
-    this.buffer = makeFullscreenTriangle(gl);
-    gl.useProgram(program);
-    gl.clearColor(0, 0, 0, 0);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+// Shared so a re-mount (model swapped away and back) resumes the animation roughly
+// where it was instead of snapping back to t=0; the smoothed mouse is persisted per side
+// so the cursor glow doesn't jump to the centre on re-mount. Normalised already.
+const FAULTY_EPOCH = (typeof performance !== "undefined" ? performance.now() : Date.now());
+const FAULTY_MOUSE_BY_SIDE = { primary: null, secondary: null };
+
+class FaultyTerminalEffect extends CanvasEffect {
+  static canvasContext = "custom";
+
+  setup() {
+    const gl = this.canvas.getContext("webgl", {
+      alpha: true,
+      antialias: false,
+      depth: false,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: false,
+      stencil: false
+    });
 
     const cfg = this.config;
-    const u = (name) => gl.getUniformLocation(program, name);
-    this.u = {
-      iTime: u("iTime"),
-      iResolution: u("iResolution"),
-      uMouse: u("uMouse")
-    };
-    // Static uniforms set once.
-    gl.uniform1f(u("uScale"), cfg.scale);
-    gl.uniform2f(u("uGridMul"), cfg.gridMul[0], cfg.gridMul[1]);
-    gl.uniform1f(u("uDigitSize"), cfg.digitSize);
-    gl.uniform1f(u("uScanlineIntensity"), cfg.scanlineIntensity);
-    gl.uniform1f(u("uGlitchAmount"), cfg.glitchAmount);
-    gl.uniform1f(u("uFlickerAmount"), cfg.flickerAmount);
-    gl.uniform1f(u("uNoiseAmp"), cfg.noiseAmp);
-    gl.uniform1f(u("uChromaticAberration"), cfg.chromaticAberration);
-    gl.uniform1f(u("uDither"), typeof cfg.dither === "boolean" ? (cfg.dither ? 1 : 0) : cfg.dither);
-    gl.uniform1f(u("uCurvature"), cfg.curvature);
-    const tint = hexToRgb01(cfg.tint);
-    gl.uniform3f(u("uTint"), tint[0], tint[1], tint[2]);
-    gl.uniform1f(u("uMouseStrength"), cfg.mouseStrength);
-    gl.uniform1f(u("uUseMouse"), cfg.mouseReact ? 1 : 0);
-    gl.uniform1f(u("uBrightness"), cfg.brightness);
+    this.tint = hexToRgb(cfg.tint);
+    this.timeScale = cfg.timeScale ?? 1;
+    // Deterministic per-side offset desyncs the two halves without Math.random (keeps
+    // dev:local reproducible); the epoch phasing makes a re-mount resume in place.
+    const offset = this.side === "primary" ? 0 : 41.7;
+    this.time = (performance.now() - FAULTY_EPOCH) / 1000 * this.timeScale + offset;
+    // Reuse the persisted object so the cursor glow resumes from its last spot and stays
+    // persisted (the draw loop mutates it in place).
+    this.smoothMouse = FAULTY_MOUSE_BY_SIDE[this.side]
+      || (FAULTY_MOUSE_BY_SIDE[this.side] = { x: 0.5, y: 0.5 });
 
-    this.smoothMouse = { x: 0.5, y: 0.5 };
-    this.timeOffset = mulberry32(this.side === "primary" ? 11 : 97)() * 100;
-    this.canvas.addEventListener("webglcontextlost", (event) => event.preventDefault());
-    return true;
+    if (!gl) {
+      this._initFallback();
+      return;
+    }
+
+    try {
+      this.gl = gl;
+      this.program = createProgram(gl, FAULTY_VERTEX, FAULTY_FRAGMENT);
+      this.positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+
+      this.locations = {
+        position: gl.getAttribLocation(this.program, "aPosition"),
+        iTime: gl.getUniformLocation(this.program, "iTime"),
+        uScale: gl.getUniformLocation(this.program, "uScale"),
+        uGridMul: gl.getUniformLocation(this.program, "uGridMul"),
+        uDigitSize: gl.getUniformLocation(this.program, "uDigitSize"),
+        uScanlineIntensity: gl.getUniformLocation(this.program, "uScanlineIntensity"),
+        uGlitchAmount: gl.getUniformLocation(this.program, "uGlitchAmount"),
+        uFlickerAmount: gl.getUniformLocation(this.program, "uFlickerAmount"),
+        uNoiseAmp: gl.getUniformLocation(this.program, "uNoiseAmp"),
+        uCurvature: gl.getUniformLocation(this.program, "uCurvature"),
+        uTint: gl.getUniformLocation(this.program, "uTint"),
+        uMouse: gl.getUniformLocation(this.program, "uMouse"),
+        uMouseStrength: gl.getUniformLocation(this.program, "uMouseStrength"),
+        uUseMouse: gl.getUniformLocation(this.program, "uUseMouse"),
+        uBrightness: gl.getUniformLocation(this.program, "uBrightness")
+      };
+
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.CULL_FACE);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.clearColor(0, 0, 0, 0);
+
+      // This canvas owns its GL context and never switches program or buffer, so the
+      // program, vertex attribute, and every static uniform are bound once here. The
+      // per-frame draw only updates the two dynamic uniforms (iTime + mouse).
+      gl.useProgram(this.program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+      gl.enableVertexAttribArray(this.locations.position);
+      gl.vertexAttribPointer(this.locations.position, 2, gl.FLOAT, false, 0, 0);
+
+      const scale = this.merged ? (cfg.mergedScale ?? cfg.scale) : cfg.scale;
+      gl.uniform1f(this.locations.uScale, scale);
+      gl.uniform2f(this.locations.uGridMul, cfg.gridMul[0], cfg.gridMul[1]);
+      gl.uniform1f(this.locations.uDigitSize, cfg.digitSize);
+      gl.uniform1f(this.locations.uScanlineIntensity, cfg.scanlineIntensity);
+      gl.uniform1f(this.locations.uGlitchAmount, cfg.glitchAmount);
+      gl.uniform1f(this.locations.uFlickerAmount, cfg.flickerAmount);
+      gl.uniform1f(this.locations.uNoiseAmp, cfg.noiseAmp);
+      gl.uniform1f(this.locations.uCurvature, cfg.curvature);
+      gl.uniform3f(this.locations.uTint, this.tint[0] / 255, this.tint[1] / 255, this.tint[2] / 255);
+      gl.uniform1f(this.locations.uMouseStrength, cfg.mouseStrength);
+      gl.uniform1f(this.locations.uUseMouse, cfg.mouseStrength > 0 ? 1 : 0);
+      gl.uniform1f(this.locations.uBrightness, cfg.brightness);
+      this.onResize();
+    } catch (error) {
+      this.teardown();
+      this._initFallback();
+    }
+  }
+
+  _initFallback() {
+    const fallback = document.createElement("canvas");
+    fallback.className = this.canvas.className;
+    fallback.style.pointerEvents = "none";
+    fallback.style.width = "100%";
+    fallback.style.height = "100%";
+    fallback.width = this.canvas.width;
+    fallback.height = this.canvas.height;
+    this.canvas.replaceWith(fallback);
+    this.canvas = fallback;
+    this.ctx = this.canvas.getContext("2d", { alpha: true });
+  }
+
+  teardown() {
+    if (!this.gl) return;
+    const gl = this.gl;
+    if (this.positionBuffer) gl.deleteBuffer(this.positionBuffer);
+    if (this.program) gl.deleteProgram(this.program);
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    this.gl = null;
+    this.program = null;
+    this.positionBuffer = null;
   }
 
   onResize() {
-    if (this.fallback || !this.gl) return;
-    const gl = this.gl;
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.useProgram(this.program);
-    gl.uniform3f(this.u.iResolution, this.canvas.width, this.canvas.height, this.canvas.width / this.canvas.height);
+    if (!this.gl || !this.program) return;
+    this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   }
 
-  _render(now) {
-    if (this.fallback || !this.gl) {
-      this._renderFallback();
-      return;
-    }
+  renderStaticFrame() {
+    if (this.destroyed || this.width <= 1 || this.height <= 1) return;
+    this.draw(1 / 30, performance.now(), true);
+  }
+
+  draw(dt, now, still) {
+    if (!still) this.time += dt * this.timeScale;
+    if (this.gl && this.program) this._drawWebgl();
+    else this._drawFallback(still);
+  }
+
+  _drawWebgl() {
     const gl = this.gl;
-    const cfg = this.config;
-    gl.useProgram(this.program);
-    const elapsed = (now * 0.001 + this.timeOffset) * cfg.timeScale;
-    gl.uniform1f(this.u.iTime, elapsed);
-    if (cfg.mouseReact) {
-      // uMouse is normalised, y flipped to match the shader's bottom-left origin.
-      this.smoothMouse.x += (this.pointerNorm.x - this.smoothMouse.x) * cfg.cursorSmoothing;
-      this.smoothMouse.y += (1 - this.pointerNorm.y - this.smoothMouse.y) * cfg.cursorSmoothing;
-      gl.uniform2f(this.u.uMouse, this.smoothMouse.x, this.smoothMouse.y);
-    }
+    // Ease the smoothed mouse toward the pointer; the shader wants y up.
+    const damp = 0.08;
+    this.smoothMouse.x += (this.pointer.x - this.smoothMouse.x) * damp;
+    this.smoothMouse.y += ((1 - this.pointer.y) - this.smoothMouse.y) * damp;
+
+    gl.uniform1f(this.locations.iTime, this.time);
+    gl.uniform2f(this.locations.uMouse, this.smoothMouse.x, this.smoothMouse.y);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  _renderFallback() {
-    const ctx = this.ctx2d;
-    if (!ctx) return;
+  // Lightweight 2D stand-in for the rare no-WebGL case: a faint flickering glyph wash
+  // plus scanlines in the tint, enough to read as a terminal without the shader.
+  _drawFallback(still) {
+    if (!this.ctx) return;
+    this.clear();
+    const ctx = this.ctx;
+    const cfg = this.config;
     const w = this.width;
     const h = this.height;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    const cell = 18;
-    const [r, g, b] = this.tintRgb;
-    ctx.fillStyle = `rgba(${r},${g},${b},0.10)`;
-    for (let y = cell; y < h; y += cell) {
-      for (let x = cell; x < w; x += cell) {
-        ctx.fillRect(x, y, 1.4, 1.4);
+    const cols = isMobile() ? 40 : 64;
+    const cellW = w / cols;
+    const rows = Math.max(24, Math.round(h / Math.max(8, cellW)));
+    const cellH = h / rows;
+    const frame = still ? 0 : Math.floor(this.time * cfg.fpsCap);
+
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < cols; col += 1) {
+        const v = hash2(col, row + (frame >> 2), 7);
+        if (v < 0.62) continue;
+        ctx.fillStyle = rgba(this.tint, (v - 0.62) / 0.38 * 0.4 * cfg.brightness);
+        ctx.fillRect(col * cellW, row * cellH, cellW * 0.6, cellH * 0.62);
       }
     }
-  }
 
-  onFrame(dt, now) {
-    this._render(now);
-  }
-
-  onStatic() {
-    this._render(this.timeOffset ? this.timeOffset * 1000 : 0);
-  }
-
-  onDestroy() {
-    const gl = this.gl;
-    if (gl) {
-      if (this.buffer) gl.deleteBuffer(this.buffer);
-      if (this.program) gl.deleteProgram(this.program);
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    ctx.fillStyle = rgba(this.tint, cfg.scanlineIntensity * 0.28);
+    for (let y = (frame % 3); y < h; y += 3) {
+      ctx.fillRect(0, y, w, 1);
     }
+  }
+}
+
+const META_MAX_BALLS = 36;
+// Shared so the metaballs survive a re-mount (switching model away and back) without
+// resetting: the motion is phased to one wall clock, and the cursor ball position is
+// remembered per side instead of starting from the centre each time.
+const META_EPOCH = (typeof performance !== "undefined" ? performance.now() : Date.now());
+const META_CURSOR_BY_SIDE = { primary: { x: 0, y: 0 }, secondary: { x: 0, y: 0 } };
+const META_VERTEX = `
+attribute vec2 aPosition;
+
+void main() {
+  gl_Position = vec4(aPosition, 0.0, 1.0);
+}
+`;
+
+const META_FRAGMENT = `
+precision highp float;
+
+uniform vec2 uResolution;
+uniform vec3 uColor;
+uniform vec3 uCursorColor;
+uniform vec3 uBalls[${META_MAX_BALLS}];
+uniform vec3 uCursor;
+uniform float uWorldHeight;
+uniform float uThreshold;
+uniform float uSoftness;
+uniform float uUseCursor;
+uniform int uBallCount;
+
+float metaball(vec2 center, float radius, vec2 point) {
+  vec2 delta = point - center;
+  return (radius * radius) / max(dot(delta, delta), 0.0008);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
+  float worldWidth = uWorldHeight * (uResolution.x / max(uResolution.y, 1.0));
+  vec2 point = (uv - 0.5) * vec2(worldWidth, uWorldHeight);
+
+  float field = 0.0;
+  float cursorField = 0.0;
+
+  for (int i = 0; i < ${META_MAX_BALLS}; i++) {
+    if (i >= uBallCount) break;
+    field += metaball(uBalls[i].xy, uBalls[i].z, point);
+  }
+
+  if (uUseCursor > 0.5) {
+    cursorField = metaball(uCursor.xy, uCursor.z, point);
+    field += cursorField;
+  }
+
+  float edge = smoothstep(uThreshold - uSoftness, uThreshold + uSoftness, field);
+  float halo = smoothstep(0.18, uThreshold * 0.72, field) * (1.0 - edge) * 0.22;
+  float alpha = max(edge * 0.82, halo);
+
+  if (alpha <= 0.002) discard;
+
+  float cursorMix = cursorField / max(field, 0.0001);
+  vec3 color = mix(uColor, uCursorColor, clamp(cursorMix * 0.72 + edge * 0.06, 0.0, 0.72));
+  gl_FragColor = vec4(color, alpha);
+}
+`;
+
+function createShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const error = gl.getShaderInfoLog(shader);
+    gl.deleteShader(shader);
+    throw new Error(error || "Shader compile failed");
+  }
+  return shader;
+}
+
+function createProgram(gl, vertexSource, fragmentSource) {
+  const vertex = createShader(gl, gl.VERTEX_SHADER, vertexSource);
+  const fragment = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+  const program = gl.createProgram();
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
+  gl.linkProgram(program);
+  gl.deleteShader(vertex);
+  gl.deleteShader(fragment);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const error = gl.getProgramInfoLog(program);
+    gl.deleteProgram(program);
+    throw new Error(error || "Program link failed");
+  }
+
+  return program;
+}
+
+class MetaballsEffect extends CanvasEffect {
+  static canvasContext = "custom";
+
+  setup() {
+    const gl = this.canvas.getContext("webgl", {
+      alpha: true,
+      antialias: false,
+      depth: false,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: false,
+      stencil: false
+    });
+
+    this.time = 0;
+    this.color = hexToRgb(this.config.color);
+    this.cursorColor = hexToRgb(this.config.cursorBallColor);
+    // Persist the cursor ball across re-mounts so it resumes rather than sliding in from
+    // the centre when the effect is switched away and back.
+    this.cursorWorld = META_CURSOR_BY_SIDE[this.side] || (META_CURSOR_BY_SIDE[this.side] = { x: 0, y: 0 });
+    this._setupBalls();
+    // Phase the animation to a shared wall clock so a freshly mounted instance picks up
+    // where a continuously-running one would be — re-mounting no longer snaps the balls
+    // back to their start formation.
+    this.time = (performance.now() - META_EPOCH) / 1000;
+    // Pre-allocated once; reused every frame so the render loop never allocates.
+    this.ballUniforms = new Float32Array(META_MAX_BALLS * 3);
+
+    if (!gl) {
+      this.ctx = this.canvas.getContext("2d", { alpha: true });
+      return;
+    }
+
+    try {
+      this.gl = gl;
+      this.program = createProgram(gl, META_VERTEX, META_FRAGMENT);
+      this.positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 3, -1, -1, 3]),
+        gl.STATIC_DRAW
+      );
+
+      this.locations = {
+        position: gl.getAttribLocation(this.program, "aPosition"),
+        resolution: gl.getUniformLocation(this.program, "uResolution"),
+        color: gl.getUniformLocation(this.program, "uColor"),
+        cursorColor: gl.getUniformLocation(this.program, "uCursorColor"),
+        balls: gl.getUniformLocation(this.program, "uBalls[0]"),
+        cursor: gl.getUniformLocation(this.program, "uCursor"),
+        worldHeight: gl.getUniformLocation(this.program, "uWorldHeight"),
+        threshold: gl.getUniformLocation(this.program, "uThreshold"),
+        softness: gl.getUniformLocation(this.program, "uSoftness"),
+        useCursor: gl.getUniformLocation(this.program, "uUseCursor"),
+        ballCount: gl.getUniformLocation(this.program, "uBallCount")
+      };
+
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.CULL_FACE);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.clearColor(0, 0, 0, this.config.enableTransparency ? 0 : 1);
+
+      // This canvas owns its own GL context and never switches program or buffer,
+      // so the program, vertex attribute, and every static uniform are bound once
+      // here. The per-frame draw only updates the two dynamic uniforms (balls + cursor).
+      gl.useProgram(this.program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+      gl.enableVertexAttribArray(this.locations.position);
+      gl.vertexAttribPointer(this.locations.position, 2, gl.FLOAT, false, 0, 0);
+      gl.uniform3f(this.locations.color, this.color[0] / 255, this.color[1] / 255, this.color[2] / 255);
+      gl.uniform3f(this.locations.cursorColor, this.cursorColor[0] / 255, this.cursorColor[1] / 255, this.cursorColor[2] / 255);
+      gl.uniform1f(this.locations.worldHeight, this.config.animationSize);
+      gl.uniform1f(this.locations.threshold, this.config.threshold);
+      gl.uniform1f(this.locations.softness, this.config.softness);
+      gl.uniform1f(this.locations.useCursor, this.config.enableMouseInteraction ? 1 : 0);
+      gl.uniform1i(this.locations.ballCount, this.ballCount);
+      this.onResize();
+    } catch (error) {
+      this.teardown();
+      const fallback = document.createElement("canvas");
+      fallback.className = this.canvas.className;
+      fallback.style.pointerEvents = "none";
+      fallback.style.width = "100%";
+      fallback.style.height = "100%";
+      fallback.width = this.canvas.width;
+      fallback.height = this.canvas.height;
+      this.canvas.replaceWith(fallback);
+      this.canvas = fallback;
+      this.ctx = this.canvas.getContext("2d", { alpha: true });
+    }
+  }
+
+  teardown() {
+    if (!this.gl) return;
+    const gl = this.gl;
+    if (this.positionBuffer) gl.deleteBuffer(this.positionBuffer);
+    if (this.program) gl.deleteProgram(this.program);
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
     this.gl = null;
     this.program = null;
-  }
-}
-
-/* ---------------- Claude: MetaBalls (WebGL2) ----------------
-   A raw-WebGL2 port of the React Bits MetaBalls shader, re-tuned for a large split-screen
-   surface. Balls are spread across aspect-aware world coordinates (worldHeight =
-   animationSize, worldWidth scales with the canvas aspect) so they fill the whole side
-   and merge softly, instead of clustering into a small central circle. A smoothed cursor
-   ball follows the pointer. Degrades to a tasteful 2D soft-blob field if WebGL2 is absent. */
-const META_MAX = 32;
-
-const META_VERT = `#version 300 es
-precision highp float;
-layout(location = 0) in vec2 position;
-void main() {
-  gl_Position = vec4(position, 0.0, 1.0);
-}
-`;
-
-const META_FRAG = `#version 300 es
-precision highp float;
-uniform vec3 iResolution;
-uniform vec3 iColor;
-uniform vec3 iCursorColor;
-uniform vec3 iMouse;
-uniform float iAnimationSize;
-uniform int iBallCount;
-uniform float iCursorBallSize;
-uniform vec3 iMetaBalls[${META_MAX}];
-uniform float iThreshold;
-uniform float iSoftness;
-uniform bool enableTransparency;
-out vec4 outColor;
-
-float mb(vec2 c, float r, vec2 p){
-  vec2 d = p - c;
-  return (r * r) / max(dot(d, d), 1e-4);
-}
-
-void main(){
-  vec2 fc = gl_FragCoord.xy;
-  float scale = iAnimationSize / iResolution.y;
-  vec2 coord = (fc - iResolution.xy * 0.5) * scale;
-  vec2 mouseW = (iMouse.xy - iResolution.xy * 0.5) * scale;
-  float m1 = 0.0;
-  for (int i = 0; i < ${META_MAX}; i++) {
-    if (i >= iBallCount) break;
-    m1 += mb(iMetaBalls[i].xy, iMetaBalls[i].z, coord);
-  }
-  float m2 = mb(mouseW, iCursorBallSize, coord);
-  float total = m1 + m2;
-  float aa = max(fwidth(total), 1e-4) * (1.0 + iSoftness * 8.0);
-  float f = smoothstep(-1.0, 1.0, (total - iThreshold) / aa);
-  vec3 cFinal = vec3(0.0);
-  if (total > 0.0) {
-    cFinal = iColor * (m1 / total) + iCursorColor * (m2 / total);
-  }
-  outColor = vec4(cFinal * f, enableTransparency ? f : 1.0);
-}
-`;
-
-class MetaballsEffect extends EffectController {
-  onSetup() {
-    const cfg = this.config;
-    this.colorRgb = hexToRgb255(cfg.color);
-    this._buildBalls();
-
-    const gl = this.canvas.getContext("webgl2", {
-      alpha: true,
-      premultipliedAlpha: false,
-      antialias: false
-    });
-    if (!gl) {
-      this.fallback = true;
-      this.ctx2d = this.canvas.getContext("2d");
-      return Boolean(this.ctx2d);
-    }
-    this.gl = gl;
-    const program = linkProgram(gl, META_VERT, META_FRAG);
-    if (!program) {
-      this.fallback = true;
-      this.ctx2d = this.canvas.getContext("2d");
-      this.gl = null;
-      return Boolean(this.ctx2d);
-    }
-    this.program = program;
-    this.buffer = makeFullscreenTriangle(gl);
-    gl.useProgram(program);
-    gl.clearColor(0, 0, 0, 0);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-    const u = (name) => gl.getUniformLocation(program, name);
-    this.u = {
-      iResolution: u("iResolution"),
-      iMouse: u("iMouse"),
-      iMetaBalls: u("iMetaBalls")
-    };
-    const colorA = hexToRgb01(cfg.color);
-    const colorC = hexToRgb01(cfg.cursorBallColor);
-    gl.uniform3f(u("iColor"), colorA[0], colorA[1], colorA[2]);
-    gl.uniform3f(u("iCursorColor"), colorC[0], colorC[1], colorC[2]);
-    gl.uniform1f(u("iAnimationSize"), cfg.animationSize);
-    gl.uniform1i(u("iBallCount"), this.ballCount);
-    gl.uniform1f(u("iCursorBallSize"), cfg.cursorBallSize);
-    gl.uniform1f(u("iThreshold"), cfg.threshold);
-    gl.uniform1f(u("iSoftness"), cfg.softness);
-    gl.uniform1i(u("enableTransparency"), cfg.enableTransparency ? 1 : 0);
-
-    this.ballData = new Float32Array(META_MAX * 3);
-    this.mouseBall = { x: 0, y: 0, init: false };
-    this.canvas.addEventListener("webglcontextlost", (event) => event.preventDefault());
-    return true;
-  }
-
-  _buildBalls() {
-    const cfg = this.config;
-    let count = this.merged ? cfg.ballCountMerged : cfg.ballCountSplit;
-    if (isMobile()) count = Math.max(6, Math.round(count * 0.6));
-    count = Math.min(count, META_MAX);
-    this.ballCount = count;
-
-    // R2 low-discrepancy sequence → even coverage across the whole world rect, so both
-    // diagonal halves stay filled (and the merged view has no bald patches).
-    const g = 1.32471795724474602596;
-    const a1 = 1 / g;
-    const a2 = 1 / (g * g);
-    const rng = mulberry32(this.side === "primary" ? 0x51ed : 0x2f9a);
-    this.balls = [];
-    for (let i = 0; i < count; i += 1) {
-      const nx = ((0.5 + a1 * (i + 1)) % 1) - 0.5 + (rng() - 0.5) * 0.06;
-      const ny = ((0.5 + a2 * (i + 1)) % 1) - 0.5 + (rng() - 0.5) * 0.06;
-      this.balls.push({
-        nx: clamp(nx, -0.5, 0.5),
-        ny: clamp(ny, -0.5, 0.5),
-        phase: rng() * Math.PI * 2,
-        freqA: 0.6 + rng() * 0.8,
-        freqB: 0.5 + rng() * 0.7,
-        orbit: 0.04 + rng() * 0.06,
-        radius: 0.115 + rng() * 0.06
-      });
-    }
+    this.positionBuffer = null;
   }
 
   onResize() {
-    if (this.fallback || !this.gl) return;
+    if (!this.gl || !this.program) return;
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.useProgram(this.program);
-    gl.uniform3f(this.u.iResolution, this.canvas.width, this.canvas.height, 0);
+    // Resolution only changes on resize, so it lives here rather than in the draw loop.
+    gl.uniform2f(this.locations.resolution, this.canvas.width, this.canvas.height);
   }
 
-  // Shared ball-position math (world units) for both GL and 2D paths.
-  _stepBalls(now, elapsed) {
+  renderStaticFrame() {
+    if (this.destroyed || this.width <= 1 || this.height <= 1) return;
+    this.draw(1 / 24, performance.now(), true);
+  }
+
+  _setupBalls() {
+    const rng = mulberry32((this.side === "primary" ? 0xc97a3d : 0xebc9a6) ^ (this.merged ? 0x9e3779b9 : 0));
+    const requestedCount = this.merged ? this.config.ballCountMerged : this.config.ballCountSplit;
+    const mobile = isMobile();
+    const mobileCount = Math.max(10, Math.round(requestedCount * 0.72));
+    const count = Math.min(META_MAX_BALLS, mobile ? mobileCount : requestedCount);
+
+    // Anchors are scattered across the WHOLE field (corners, edges, centre) rather than
+    // bunched near the middle, so the goo reads as "metaballs everywhere". A few balls
+    // share each anchor in a tight cluster, which is what keeps each blob merged and
+    // gooey instead of looking like isolated dots — the spread/merge trade-off.
+    const anchors = this.merged
+      ? [
+        [-0.42, -0.34], [-0.02, -0.36], [0.40, -0.32],
+        [-0.44, 0.02], [0.08, 0.06], [0.44, -0.02],
+        [-0.30, 0.36], [0.14, 0.40], [0.42, 0.34]
+      ]
+      : [
+        [-0.40, -0.34], [0.02, -0.32], [0.40, -0.36],
+        [-0.42, 0.06], [0.16, 0.12],
+        [-0.18, 0.38], [0.40, 0.30]
+      ];
+    const minRadius = this.config.minBallRadius;
+    const maxRadius = this.config.maxBallRadius;
+    const radiusScale = mobile ? 0.82 : 1;
+    const clusterScale = mobile ? 1.2 : 1;
+
+    this.spreadX = this.config.spreadX ?? 1;
+    this.spreadY = this.config.spreadY ?? 1;
+    this.time = 0;
+    this.balls = Array.from({ length: count }, (_, index) => {
+      const anchor = anchors[index % anchors.length];
+      const ring = Math.floor(index / anchors.length);
+      const angle = rng() * Math.PI * 2;
+      // Tight cluster radius so each anchor's balls overlap and merge into one blob.
+      const distance = (0.028 + rng() * 0.05 + ring * 0.022) * clusterScale;
+      return {
+        homeX: clamp(anchor[0] + Math.cos(angle) * distance, -0.48, 0.48),
+        homeY: clamp(anchor[1] + Math.sin(angle) * distance, -0.46, 0.46),
+        radius: (minRadius + rng() * (maxRadius - minRadius)) * radiusScale,
+        ampX: 0.014 + rng() * 0.022,
+        ampY: 0.014 + rng() * 0.026,
+        phase: rng() * Math.PI * 2,
+        speed: 0.6 + rng() * 0.7
+      };
+    });
+    this.ballCount = this.balls.length;
+  }
+
+  draw(dt, now, still) {
+    if (!still) this.time += dt;
+    if (this.gl && this.program) {
+      this._drawWebgl();
+    } else {
+      this._drawFallback(still);
+    }
+  }
+
+  _worldWidth(worldHeight) {
+    return worldHeight * (this.canvas.width / Math.max(1, this.canvas.height));
+  }
+
+  // Writes the current ball positions straight into the reused Float32Array and updates
+  // the cursor ball in place — no per-frame allocations, so the loop produces no GC churn.
+  _advance(worldWidth, worldHeight) {
     const cfg = this.config;
-    const worldH = cfg.animationSize;
-    const worldW = worldH * (this.canvas.width / Math.max(1, this.canvas.height));
-    const positions = [];
-    for (let i = 0; i < this.ballCount; i += 1) {
-      const ball = this.balls[i];
-      const ax = ball.nx * worldW * cfg.spreadX;
-      const ay = ball.ny * worldH * cfg.spreadY;
-      const ox = Math.cos(elapsed * cfg.speed * ball.freqA + ball.phase) * worldH * ball.orbit;
-      const oy = Math.sin(elapsed * cfg.speed * ball.freqB + ball.phase) * worldH * ball.orbit;
-      positions.push({
-        x: (ax + ox) * cfg.clumpFactor,
-        y: (ay + oy) * cfg.clumpFactor,
-        r: worldH * ball.radius
-      });
+    const speed = cfg.speed;
+    const balls = this.balls;
+    const arr = this.ballUniforms;
+    const sx = this.spreadX;
+    const sy = this.spreadY;
+
+    for (let i = 0; i < balls.length; i += 1) {
+      const ball = balls[i];
+      const t = this.time * speed * ball.speed + ball.phase;
+      const offset = i * 3;
+      arr[offset] = (ball.homeX * sx + Math.sin(t) * ball.ampX) * worldWidth;
+      arr[offset + 1] = (ball.homeY * sy + Math.cos(t * 0.9) * ball.ampY) * worldHeight;
+      arr[offset + 2] = ball.radius;
     }
-    return positions;
+
+    const cursor = this.cursorWorld;
+    let targetX;
+    let targetY;
+    let smoothness;
+    if (cfg.enableMouseInteraction && this.pointerInside) {
+      // Ease toward the pointer each frame — smooth trailing follow, like the reference.
+      targetX = (this.pointer.x - 0.5) * worldWidth;
+      targetY = (0.5 - this.pointer.y) * worldHeight;
+      smoothness = cfg.hoverSmoothness ?? 0.22;
+    } else {
+      // No pointer: drift on a slow orbit, eased more gently.
+      const drift = cfg.idleDriftRadiusRatio || 0.08;
+      targetX = Math.cos(this.time * speed * 0.9) * worldWidth * drift;
+      targetY = Math.sin(this.time * speed * 0.7) * worldHeight * drift;
+      smoothness = cfg.idleSmoothness || 0.08;
+    }
+    cursor.x += (targetX - cursor.x) * smoothness;
+    cursor.y += (targetY - cursor.y) * smoothness;
   }
 
-  _cursorTarget(now, elapsed) {
-    const cw = this.canvas.width;
-    const ch = this.canvas.height;
-    const interactive = this.config.enableMouseInteraction && !this.isIdle(now, 1200);
-    if (interactive) {
-      return { x: this.pointerNorm.x * cw, y: (1 - this.pointerNorm.y) * ch };
-    }
-    // Idle: a slow orbit near centre so the cursor ball keeps the field alive.
-    return {
-      x: cw * 0.5 + Math.cos(elapsed * this.config.speed) * cw * 0.15,
-      y: ch * 0.5 + Math.sin(elapsed * this.config.speed * 0.9) * ch * 0.15
-    };
-  }
-
-  _render(now, isStatic) {
-    const elapsed = isStatic ? 0 : now * 0.001;
-    if (this.fallback || !this.gl) {
-      this._renderFallback(now, elapsed);
-      return;
-    }
+  _drawWebgl() {
     const gl = this.gl;
-    const positions = this._stepBalls(now, elapsed);
-    const data = this.ballData;
-    for (let i = 0; i < this.ballCount; i += 1) {
-      data[i * 3] = positions[i].x;
-      data[i * 3 + 1] = positions[i].y;
-      data[i * 3 + 2] = positions[i].r;
-    }
-    gl.useProgram(this.program);
-    gl.uniform3fv(this.u.iMetaBalls, data);
+    const worldHeight = this.config.animationSize;
+    const worldWidth = this._worldWidth(worldHeight);
+    this._advance(worldWidth, worldHeight);
 
-    const target = this._cursorTarget(now, elapsed);
-    if (!this.mouseBall.init || isStatic) {
-      this.mouseBall.x = target.x;
-      this.mouseBall.y = target.y;
-      this.mouseBall.init = true;
-    }
-    this.mouseBall.x += (target.x - this.mouseBall.x) * this.config.hoverSmoothness;
-    this.mouseBall.y += (target.y - this.mouseBall.y) * this.config.hoverSmoothness;
-    gl.uniform3f(this.u.iMouse, this.mouseBall.x, this.mouseBall.y, 0);
-
+    // Program, vertex attribute, resolution and every static uniform were bound once in
+    // setup()/onResize(); only the two dynamic uniforms change here.
     gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform3fv(this.locations.balls, this.ballUniforms);
+    gl.uniform3f(this.locations.cursor, this.cursorWorld.x, this.cursorWorld.y, this.config.cursorBallSize);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  // 2D degradation: soft radial-gradient blobs in the warm colour. No true metaball
-  // merging, but a tasteful, calm field that keeps Claude's identity.
-  _renderFallback(now, elapsed) {
-    const ctx = this.ctx2d;
-    if (!ctx) return;
+  _drawFallback() {
+    if (!this.ctx) return;
+    this.clear();
+    const ctx = this.ctx;
     const w = this.width;
     const h = this.height;
-    const cfg = this.config;
-    const [r, g, b] = this.colorRgb;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    const scale = h / cfg.animationSize;
-    for (let i = 0; i < this.ballCount; i += 1) {
-      const ball = this.balls[i];
-      const ax = (ball.nx * cfg.spreadX + 0.5) * w;
-      const ay = (ball.ny * cfg.spreadY + 0.5) * h;
-      const ox = Math.cos(elapsed * cfg.speed * ball.freqA + ball.phase) * w * 0.04;
-      const oy = Math.sin(elapsed * cfg.speed * ball.freqB + ball.phase) * h * 0.04;
-      const x = ax + ox;
-      const y = ay + oy;
-      const radius = cfg.animationSize * ball.radius * scale * 1.6;
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
-      grad.addColorStop(0, `rgba(${r},${g},${b},0.5)`);
-      grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    const worldHeight = this.config.animationSize;
+    const worldWidth = this._worldWidth(worldHeight);
+    this._advance(worldWidth, worldHeight);
+    const arr = this.ballUniforms;
+
+    ctx.save();
+    ctx.filter = "blur(8px) contrast(1.55)";
+    ctx.globalCompositeOperation = "lighter";
+
+    const paint = (px, py, pr, headColor, headAlpha) => {
+      const grad = ctx.createRadialGradient(px, py, pr * 0.08, px, py, pr);
+      grad.addColorStop(0, rgba(headColor, headAlpha));
+      grad.addColorStop(0.58, rgba(this.color, 0.24));
+      grad.addColorStop(1, rgba(this.color, 0));
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
       ctx.fill();
+    };
+
+    for (let i = 0; i < this.ballCount; i += 1) {
+      const offset = i * 3;
+      const x = (arr[offset] / worldWidth + 0.5) * w;
+      const y = (0.5 - arr[offset + 1] / worldHeight) * h;
+      const r = (arr[offset + 2] / worldHeight) * h;
+      paint(x, y, r, this.color, 0.48);
     }
-  }
 
-  onFrame(dt, now) {
-    this._render(now, false);
-  }
-
-  onStatic() {
-    this._render(performance.now(), true);
-  }
-
-  onDestroy() {
-    const gl = this.gl;
-    if (gl) {
-      if (this.buffer) gl.deleteBuffer(this.buffer);
-      if (this.program) gl.deleteProgram(this.program);
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    if (this.config.enableMouseInteraction) {
+      const cx = (this.cursorWorld.x / worldWidth + 0.5) * w;
+      const cy = (0.5 - this.cursorWorld.y / worldHeight) * h;
+      const cr = (this.config.cursorBallSize / worldHeight) * h;
+      paint(cx, cy, cr, this.cursorColor, 0.54);
     }
-    this.gl = null;
-    this.program = null;
-    this.balls = null;
+
+    ctx.restore();
   }
 }
 
-/* ---------------- manager ----------------
-   One controller per side, swapped with a CSS opacity crossfade. A side's identity is
-   keyed by `${effectType}|${merged?m:s}`; when that key changes we mount the incoming
-   effect, fade it in, fade the outgoing one out, then destroy the outgoing controller. */
 function createController(type, host, opts) {
-  switch (type) {
-    case "antigravity":
-      return new AntigravityEffect(host, CONFIG_BY_TYPE[type], opts);
-    case "faulty-terminal":
-      return new FaultyTerminalEffect(host, CONFIG_BY_TYPE[type], opts);
-    case "metaballs":
-      return new MetaballsEffect(host, CONFIG_BY_TYPE[type], opts);
-    default:
-      return null;
-  }
+  const config = CONFIG_BY_TYPE[type];
+  if (!config) return null;
+  if (type === "antigravity") return new GeminiEffect(host, config, opts);
+  if (type === "faulty-terminal") return new FaultyTerminalEffect(host, config, opts);
+  if (type === "metaballs") return new MetaballsEffect(host, config, opts);
+  return null;
 }
 
-const SLOTS = {
-  primary: { key: "none", controller: null, instance: null },
-  secondary: { key: "none", controller: null, instance: null }
+const slots = {
+  primary: { key: "none", instance: null, controller: null, pending: 0 },
+  secondary: { key: "none", instance: null, controller: null, pending: 0 }
 };
-const CROSSFADE_MS = 600;
-const pending = [];
 
-function retireController(instance, controller) {
-  if (instance) instance.classList.remove("is-active");
-  const entry = { controller, instance, timer: 0 };
-  entry.timer = setTimeout(() => {
+let token = 0;
+
+function retire(instance, controller) {
+  if (!instance && !controller) return;
+  instance?.classList.remove("is-active");
+  setTimeout(() => {
     controller?.destroy();
     instance?.remove();
-    const index = pending.indexOf(entry);
-    if (index >= 0) pending.splice(index, 1);
-  }, CROSSFADE_MS + 80);
-  pending.push(entry);
+  }, CROSSFADE_MS + 40);
 }
 
-function applySide(container, side, type, mergedForSide) {
-  const stage = container.querySelector(`.fx-stage[data-side="${side}"]`);
-  if (!stage) return;
-  const slot = SLOTS[side];
-  const usable = Boolean(type) && Boolean(CONFIG_BY_TYPE[type]);
-  const key = usable ? `${type}|${mergedForSide ? "m" : "s"}` : "none";
+function clearSide(side, immediate = false) {
+  const slot = slots[side];
+  slot.pending += 1;
+  if (immediate) {
+    slot.controller?.destroy();
+    slot.instance?.remove();
+  } else {
+    retire(slot.instance, slot.controller);
+  }
+  slot.key = "none";
+  slot.instance = null;
+  slot.controller = null;
+}
 
-  if (slot.key === key) {
-    slot.controller?.resize();
+function mountSide(container, side, type, merged, defer) {
+  const stage = container.querySelector(`.fx-stage[data-side="${side}"]`);
+  const slot = slots[side];
+  const config = CONFIG_BY_TYPE[type];
+  const nextKey = config ? `${type}:${merged ? "merged" : "split"}` : "none";
+
+  if (!stage || !config) {
+    clearSide(side, true);
+    return;
+  }
+  if (slot.key === nextKey && slot.controller) {
+    slot.controller.resize();
     return;
   }
 
-  if (slot.controller) retireController(slot.instance, slot.controller);
-  slot.key = key;
-  slot.controller = null;
-  slot.instance = null;
-  if (!usable) return;
+  const runToken = ++slot.pending;
+  const run = () => {
+    if (runToken !== slot.pending || !container.isConnected || !stage.isConnected) return;
 
-  const config = CONFIG_BY_TYPE[type];
-  const instance = document.createElement("div");
-  instance.className = "fx-instance";
-  if (config.opacity != null) instance.style.setProperty("--fx-opacity", String(config.opacity));
-  stage.appendChild(instance);
-  const controller = createController(type, instance, { merged: mergedForSide, side });
-  slot.instance = instance;
-  slot.controller = controller;
-  controller?.start();
-  // Next frame: trigger the opacity transition (mounting + fading on the same frame skips it).
-  requestAnimationFrame(() => instance.classList.add("is-active"));
+    const instance = document.createElement("div");
+    instance.className = "fx-instance";
+    instance.style.setProperty("--fx-opacity", String(config.opacity ?? 1));
+    stage.appendChild(instance);
+
+    const controller = createController(type, instance, { merged, side });
+    controller?.start();
+    retire(slot.instance, slot.controller);
+
+    slot.key = nextKey;
+    slot.instance = instance;
+    slot.controller = controller;
+
+    requestAnimationFrame(() => {
+      if (slot.instance === instance) instance.classList.add("is-active");
+    });
+  };
+
+  if (defer) afterPaint(run);
+  else run();
 }
 
-// Mount / update both sides. When the two models match (`merged`), the primary effect
-// fills the viewport (its mask is dropped in CSS) and the secondary is destroyed.
 export function syncModelEffects(container, { primary, secondary, merged }) {
   if (!container) return;
-  applySide(container, "primary", primary, Boolean(merged));
-  applySide(container, "secondary", merged ? null : secondary, false);
+  token += 1;
+  mountSide(container, "primary", primary, Boolean(merged), false);
+  if (merged) clearSide("secondary", true);
+  else mountSide(container, "secondary", secondary, false, false);
 }
 
-// Tear everything down when leaving the model screen: live controllers and any
-// mid-crossfade outgoing ones, so no RAF loop / observer / WebGL context survives.
+export function syncModelEffectsDeferred(container, { primary, secondary, merged }) {
+  if (!container) return;
+  token += 1;
+  const runToken = token;
+  afterPaint(() => {
+    if (runToken !== token) return;
+    mountSide(container, "primary", primary, Boolean(merged), false);
+    if (merged) clearSide("secondary", true);
+    else mountSide(container, "secondary", secondary, false, false);
+  });
+}
+
 export function destroyModelEffects() {
-  for (const side of ["primary", "secondary"]) {
-    const slot = SLOTS[side];
-    slot.controller?.destroy();
-    slot.instance?.remove();
-    slot.controller = null;
-    slot.instance = null;
-    slot.key = "none";
-  }
-  for (const entry of pending.splice(0)) {
-    clearTimeout(entry.timer);
-    entry.controller?.destroy();
-    entry.instance?.remove();
-  }
+  token += 1;
+  clearSide("primary", true);
+  clearSide("secondary", true);
 }
