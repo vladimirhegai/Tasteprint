@@ -58,8 +58,16 @@ export async function startServer(options) {
   console.log(`Tasteprint is running at ${url}`);
   console.log(`Files will be generated in ${projectDir}`);
 
+  // openPath lets a caller deep-link the launch (e.g. the anatomy editor at /?anatomy)
+  // without disturbing the default "/" entry point.
+  const openPath = typeof options.openPath === "string" ? options.openPath : "";
+  const openUrl = `${url}${openPath}`;
+  if (openPath) {
+    console.log(`Anatomy editor: ${openUrl}`);
+  }
+
   if (options.open) {
-    openBrowser(url);
+    openBrowser(openUrl);
   }
 
   return {

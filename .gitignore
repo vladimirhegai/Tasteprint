@@ -30,3 +30,8 @@ awesome-design-md/
 awesome-design-skills/
 Google/
 google/
+
+# Agent and local tool metadata
+.agents/
+.impeccable/
+skills-lock.json

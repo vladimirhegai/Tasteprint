@@ -1,5 +1,5 @@
 import { applyTheme, BASE_THEME, buildTheme } from "./theme.js";
-import { ensureContrast } from "./color.js";
+import { ensureContrast, contrastRatio, mixHex } from "./color.js";
 import { archetypeForGroup, brandForReference, MOOD_THEMES } from "./themes.db.js";
 
 const app = document.querySelector("#app");
@@ -34,8 +34,74 @@ const STEP_GROUP = {
   final: "Files"
 };
 
+// The five named phases of the interview, in order. Used for the "Step n of 5"
+// indicator so the model screen reads as the opening move of a real flow.
+const PHASES = ["Context", "Taste", "References", "Direction", "Files"];
+
+function stepEyebrow() {
+  const index = PHASES.indexOf(STEP_GROUP[state.step]);
+  return index >= 0 ? `Step ${index + 1} of ${PHASES.length}` : "";
+}
+
+// The model screen only offers these three CLIs. Each is its own little "world":
+// a tinted page background, a contrasting card, ink, and an accent. The two chosen
+// models split the screen along a top-right → bottom-left diagonal; picking the same
+// model twice merges the worlds back into one. See updateModelSplit().
+const ALLOWED_MODEL_IDS = ["codex", "claude", "gemini"];
+
+// Each agent gets a full themed "world", split conceptually into COLOR + EFFECT.
+//   COLOR  — the palette half: two soft field stops (the base wash, kept low in
+//            saturation so two worlds blend rather than collide), two bloom tones
+//            (the slow drifting luminosity), a near-white card, ink/hairline/accent,
+//            a glow, and a radius that nudges the feel.
+//   EFFECT — the model's signature motion language, keyed independently of colour:
+//     codex  → grid    : precise / technical — a faint structural baseline grid
+//     gemini → dots     : airy / cosmic — a drifting dot cloud, ideas suspended in air
+//     claude → bubbles  : warm / human — soft tinted bubbles rising and gathering
+// Fields are deliberately pale so the seam between two worlds reads as a gentle
+// editorial field change. Ratios checked with the internal color tool
+// (src/colorTools.js): ink/card 13–14:1, muted/card ~5:1.
+const MODEL_WORLDS = {
+  codex: {
+    bg: "#DDEDE5", field1: "#EAF4EF", field2: "#D3E8DD", bloom1: "#9FDDC4", bloom2: "#C2EAD8",
+    card: "#F3F7F4", ink: "#16271F", inkMuted: "#5A6F64", hairline: "#C5DFD4",
+    accent: "#1F9D78", glow: "rgba(31, 157, 120, 0.16)", radius: "10px", effect: "grid"
+  },
+  claude: {
+    bg: "#EBDDCC", field1: "#F3EADF", field2: "#E7D7C6", bloom1: "#EBC9A6", bloom2: "#E5D2BC",
+    card: "#F8F1E8", ink: "#3A2516", inkMuted: "#74583F", hairline: "#E0CBB3",
+    accent: "#C97A3D", glow: "rgba(201, 122, 61, 0.16)", radius: "22px", effect: "bubbles"
+  },
+  gemini: {
+    bg: "#DEE2FB", field1: "#EAECFD", field2: "#D6DBFA", bloom1: "#BCC4FF", bloom2: "#CDBEF7",
+    card: "#F1F2FC", ink: "#1B1E3C", inkMuted: "#565C8A", hairline: "#C9CEF3",
+    accent: "#4F5BD5", glow: "rgba(79, 91, 213, 0.18)", radius: "16px", effect: "dots"
+  }
+};
+
+const NEUTRAL_WORLD = {
+  bg: "#F1EFEA", field1: "#F4F2EE", field2: "#E8E5DE", bloom1: "#E9E6DE", bloom2: "#F1EFEA",
+  card: "#FFFFFF", ink: "#151517", inkMuted: "#6D7078", hairline: "#E1E1DD",
+  accent: "#5E6AD2", glow: "rgba(94, 106, 210, 0.14)", radius: "18px", effect: "none"
+};
+
+function worldForModelId(id) {
+  return MODEL_WORLDS[id] || NEUTRAL_WORLD;
+}
+
+// The split CTA paints white text over a diagonal of the two worlds' accents. The
+// raw brand accents (green/clay) are too light to carry white text at WCAG AA, so
+// each is deepened just enough to clear 4.5:1 — only for the button, never the
+// world's visible accent. Mirrors the loop the internal color tool would run.
+function ctaAccentFor(accent) {
+  let color = accent;
+  for (let step = 0; step < 30 && contrastRatio("#FFFFFF", color) < 4.5; step += 1) {
+    color = mixHex(color, "#000000", 0.06);
+  }
+  return color;
+}
+
 const LOADER_PHRASES = {
-  boot: ["Loading your local studio."],
   followups: ["Reading your project.", "Finding the gaps worth asking about."],
   personality: ["Reading your project.", "Tuning the taste options."],
   anti: ["Listening for the wrong notes.", "Setting the guardrails."],
@@ -86,8 +152,31 @@ const state = {
 let shellMounted = false;
 let loaderTimer = null;
 let pendingPulse = false;
-let introTimer = null;
+let introTimers = [];
+let introMoveHandler = null;
+let introMoveTarget = null;
 let activeTheme = { ...BASE_THEME };
+
+// Name-reveal choreography. CSS animation stagger/durations must match these.
+const INTRO_WORD = "Tasteprint";
+const INTRO_ENTRY_MS = 520;
+const INTRO_ENTRY_STAGGER = 26;
+const INTRO_EXIT_MS = 400;
+const INTRO_EXIT_STAGGER = 22;
+const INTRO_Y_JITTER = [-20, 16, -10, 22, -14, 12, -24, 18, -8, 14];
+// Letters finish arriving here; the CTA fades in just after (the delay tracks the
+// real entrance, not a magic number). The exit duration times the hand-off to models.
+const INTRO_ENTRY_END = INTRO_ENTRY_STAGGER * (INTRO_WORD.length - 1) + INTRO_ENTRY_MS;
+const INTRO_CTA_DELAY = INTRO_ENTRY_END + 120;
+const INTRO_EXIT_DURATION = INTRO_EXIT_STAGGER * (INTRO_WORD.length - 1) + INTRO_EXIT_MS;
+
+// Anatomy editor: an opt-in dev tool (`npm run dev:anatomy`, which opens /?anatomy)
+// that freezes the intro on its static frame with the CTA-hover blueprint always
+// revealed and every call-out draggable, plus a button that copies the measured
+// positions back as CSS. Off unless the query flag is present, so the normal
+// deterministic flow is byte-for-byte unaffected.
+const ANATOMY_EDIT = typeof location !== "undefined" &&
+  new URLSearchParams(location.search).has("anatomy");
 
 bindAppEvents();
 init();
@@ -96,6 +185,7 @@ async function init() {
   applyTheme(BASE_THEME);
   state.loading = "boot";
   paint();
+  const bootStart = Date.now();
 
   try {
     const [models, references, health] = await Promise.all([
@@ -109,10 +199,10 @@ async function init() {
     state.projectDir = health.projectDir;
     state.localOnly = Boolean(health.localOnly);
 
-    const installed = state.availableModels.filter((model) => !model.fallback);
-    const fallback = state.availableModels.find((model) => model.fallback) || state.availableModels[0];
-    state.models.primary = modelWithDefaults(installed[0] || fallback);
-    state.models.secondary = modelWithDefaults(installed[1] || installed[0] || fallback);
+    const allowed = state.availableModels.filter((model) => ALLOWED_MODEL_IDS.includes(model.id));
+    const pool = allowed.length ? allowed : state.availableModels;
+    state.models.primary = modelWithDefaults(pool[0]);
+    state.models.secondary = modelWithDefaults(pool[1] || pool[0]);
     state.loading = "";
     state.step = state.introSeen ? "models" : "intro";
   } catch (error) {
@@ -121,6 +211,9 @@ async function init() {
     state.error = error.message;
   }
 
+  // Keep the entrance loader on screen briefly so the boot → reveal hand-off
+  // reads as one choreographed moment instead of a flash (instant in dev:local).
+  await delay(Math.max(0, 250 - (Date.now() - bootStart)));
   paint({ transition: true });
 }
 
@@ -131,7 +224,7 @@ function paint({ transition = false } = {}) {
 
   if (state.loading === "boot") {
     shellMounted = false;
-    app.innerHTML = `<div class="intro"><div class="loader" style="width:min(420px,80vw)"><div class="loader-line"></div><div class="loader-status">${esc(LOADER_PHRASES.boot[0])}</div></div></div>`;
+    app.innerHTML = `<div class="boot"><div class="boot-loader" aria-label="Loading"></div></div>`;
     return;
   }
 
@@ -159,7 +252,7 @@ function shellHtml() {
       </header>
       <main class="screen" id="screen"></main>
       <div class="bottom-bar">
-        <div class="brand">Tasteprint</div>
+        <div class="brand">${splitText("Tasteprint")}</div>
         <div class="footer-inner" id="footer"></div>
       </div>
     </div>
@@ -185,14 +278,16 @@ function mountStep({ transition = false } = {}) {
     topActions.innerHTML = contextUsageHtml();
   }
 
-  screen.className = `screen ${descriptor.wide ? "wide" : ""}`;
+  screen.className = `screen ${descriptor.wide ? "wide" : ""} ${descriptor.centered ? "centered" : ""}`;
   screen.innerHTML = `
-    <p class="eyebrow">${esc(descriptor.eyebrow)}</p>
-    <h1 class="title">${esc(descriptor.title)}</h1>
+    ${descriptor.eyebrow ? `<p class="eyebrow">${esc(descriptor.eyebrow)}</p>` : ""}
+    <h1 class="title">${descriptor.titleHtml || esc(descriptor.title)}</h1>
     ${descriptor.helper ? `<p class="helper">${esc(descriptor.helper)}</p>` : ""}
     <div class="body ${descriptor.bodyClass || ""}">${descriptor.body}</div>
   `;
   footer.innerHTML = descriptor.loadingKey ? "" : (descriptor.footer || "");
+
+  updateModelSplit();
 
   if (transition) {
     // Reset any in-flight enter animation, then force a reflow so re-adding the
@@ -201,6 +296,17 @@ function mountStep({ transition = false } = {}) {
     void screen.offsetWidth;
     screen.classList.add("screen-enter");
     screen.addEventListener("animationend", () => screen.classList.remove("screen-enter"), { once: true });
+
+    // Hand-off into the model screen: the two cards stagger up underneath the
+    // atmosphere instead of arriving with the shell. Only on a real screen change
+    // (go), never on an in-place refresh — so editing a dropdown doesn't re-stagger.
+    if (state.step === "models" && !prefersReducedMotion()) {
+      const stage = screen.querySelector(".model-stage");
+      if (stage) {
+        stage.classList.add("is-entering");
+        setTimeout(() => stage.classList.remove("is-entering"), 680);
+      }
+    }
   }
 
   applyThemeForStep();
@@ -279,6 +385,146 @@ function themeForStep(step) {
   }
 }
 
+// Drives the model atmosphere: two living fields that meet on a soft diagonal — the
+// primary world fills the top-left, the secondary blends in from the bottom-right —
+// plus the root CSS vars the cards, split text, and CTA read. Each field carries a
+// flowing-gradient base, drifting blooms, and a signature effect. Picking the same
+// model on both sides makes every side colour equal, so the seam dissolves and the
+// two worlds merge.
+let modelSplitBg = null;
+const SPLIT_VARS = [
+  "--p-side", "--s-side", "--seam-opacity",
+  "--p-field-1", "--p-field-2", "--p-bloom-1", "--p-bloom-2",
+  "--p-card", "--p-ink", "--p-ink-muted", "--p-hairline", "--p-accent", "--p-cta", "--p-glow", "--p-radius",
+  "--s-field-1", "--s-field-2", "--s-bloom-1", "--s-bloom-2",
+  "--s-card", "--s-ink", "--s-ink-muted", "--s-hairline", "--s-accent", "--s-cta", "--s-glow", "--s-radius",
+  "--sl", "--sr"
+];
+
+function updateModelSplit() {
+  if (state.step !== "models") {
+    clearModelSplit();
+    return;
+  }
+
+  const primary = worldForModelId(state.models.primary?.id);
+  const secondary = worldForModelId(state.models.secondary?.id);
+  const merged = state.models.primary?.id === state.models.secondary?.id;
+
+  if (!modelSplitBg) {
+    modelSplitBg = document.createElement("div");
+    modelSplitBg.className = "model-atmos";
+    modelSplitBg.setAttribute("aria-hidden", "true");
+    // Two atmospheres + a soft seam sheen. The secondary layer is masked to the
+    // bottom-right and feathered across the diagonal, so the worlds dissolve into
+    // each other instead of meeting at a hard edge. Each layer carries a slow
+    // flowing-gradient base, drifting blooms, and all three effect layers (grid /
+    // dots / bubbles) — only the active one is opaque, so a model swap crossfades
+    // the effect. All motion is CSS.
+    modelSplitBg.innerHTML = `
+      <div class="atmos atmos-primary">${atmosLayersHtml()}</div>
+      <div class="atmos atmos-secondary">${atmosLayersHtml()}</div>
+      <div class="model-seam"></div>`;
+    app.prepend(modelSplitBg);
+    requestAnimationFrame(() => modelSplitBg?.classList.add("is-on"));
+  }
+
+  // Effect language is chosen per side independently of colour; colours below ride
+  // typed CSS vars so a dropdown change eases from one palette to the next, while the
+  // effect layers crossfade via the data-effect hook.
+  modelSplitBg.querySelector(".atmos-primary")?.setAttribute("data-effect", primary.effect);
+  modelSplitBg.querySelector(".atmos-secondary")?.setAttribute("data-effect", secondary.effect);
+
+  document.documentElement.dataset.screen = "models";
+  document.documentElement.dataset.merged = merged ? "true" : "false";
+
+  const root = document.documentElement.style;
+  root.setProperty("--p-side", primary.bg);
+  root.setProperty("--s-side", secondary.bg);
+  root.setProperty("--p-field-1", primary.field1);
+  root.setProperty("--p-field-2", primary.field2);
+  root.setProperty("--p-bloom-1", primary.bloom1);
+  root.setProperty("--p-bloom-2", primary.bloom2);
+  root.setProperty("--s-field-1", secondary.field1);
+  root.setProperty("--s-field-2", secondary.field2);
+  root.setProperty("--s-bloom-1", secondary.bloom1);
+  root.setProperty("--s-bloom-2", secondary.bloom2);
+  // The seam is just a faint fold of light; it recedes entirely when the two
+  // worlds become one. Soft, not a geometric event.
+  root.setProperty("--seam-opacity", merged ? "0" : "0.55");
+  root.setProperty("--p-card", primary.card);
+  root.setProperty("--p-ink", primary.ink);
+  root.setProperty("--p-ink-muted", primary.inkMuted);
+  root.setProperty("--p-hairline", primary.hairline);
+  root.setProperty("--p-accent", primary.accent);
+  root.setProperty("--p-cta", ctaAccentFor(primary.accent));
+  root.setProperty("--p-glow", primary.glow);
+  root.setProperty("--p-radius", primary.radius);
+  root.setProperty("--s-card", secondary.card);
+  root.setProperty("--s-ink", secondary.ink);
+  root.setProperty("--s-ink-muted", secondary.inkMuted);
+  root.setProperty("--s-hairline", secondary.hairline);
+  root.setProperty("--s-accent", secondary.accent);
+  root.setProperty("--s-cta", ctaAccentFor(secondary.accent));
+  root.setProperty("--s-glow", secondary.glow);
+  root.setProperty("--s-radius", secondary.radius);
+  // Split-text wedges: left wins the primary ink, right the secondary ink.
+  root.setProperty("--sl", primary.ink);
+  root.setProperty("--sr", secondary.ink);
+}
+
+// One atmosphere's layer stack, bottom → top: a slow flowing-gradient base, two
+// drifting blooms, then the three effect layers. data-effect on the parent decides
+// which effect layer is visible; the others sit at opacity 0 and crossfade on swap.
+function atmosLayersHtml() {
+  return `
+    <div class="atmos-flow"></div>
+    <div class="atmos-blob blob-a"></div>
+    <div class="atmos-blob blob-b"></div>
+    <div class="fx fx-grid"></div>
+    <div class="fx fx-dots"></div>
+    <div class="fx fx-bubbles">${bubblesHtml()}</div>`;
+}
+
+// Claude's signature: soft, blurred, tinted bubbles that float, breathe, and drift
+// gently in place. Spread across the WHOLE field (both diagonal halves) via per-bubble
+// top/left so that, once each side's mask clips it to its own section, the primary
+// (top-left) and secondary (bottom-right) each get a balanced handful — and when BOTH
+// sides are Claude the bubbles fill the entire field. Varied size / position / speed /
+// phase / drift so they never march in lockstep. Few and subtle — not a lava lamp.
+function bubblesHtml() {
+  const bubbles = [
+    // Top-left cluster — shown when the PRIMARY side is Claude.
+    { size: 62, left: 10, top: 20, dur: 17, delay: 0, dx: 14, dy: -20 },
+    { size: 34, left: 26, top: 44, dur: 22, delay: 6, dx: -12, dy: -16 },
+    { size: 78, left: 15, top: 67, dur: 19, delay: 11, dx: 10, dy: -24 },
+    { size: 30, left: 40, top: 26, dur: 24, delay: 3, dx: -8, dy: -18 },
+    { size: 48, left: 33, top: 78, dur: 16, delay: 9, dx: 16, dy: -14 },
+    { size: 26, left: 46, top: 54, dur: 26, delay: 14, dx: 12, dy: -22 },
+    // Bottom-right cluster — shown when the SECONDARY side is Claude.
+    { size: 56, left: 60, top: 48, dur: 18, delay: 4, dx: -14, dy: -18 },
+    { size: 32, left: 76, top: 30, dur: 23, delay: 10, dx: 12, dy: -20 },
+    { size: 70, left: 70, top: 72, dur: 20, delay: 2, dx: -10, dy: -16 },
+    { size: 28, left: 88, top: 54, dur: 25, delay: 7, dx: 10, dy: -24 },
+    { size: 46, left: 58, top: 82, dur: 17, delay: 13, dx: 14, dy: -14 },
+    { size: 38, left: 85, top: 80, dur: 21, delay: 8, dx: -12, dy: -22 }
+  ];
+  return bubbles
+    .map((b) => `<span class="bubble" style="--size:${b.size}px;--left:${b.left}%;--top:${b.top}%;--dur:${b.dur}s;--delay:-${b.delay}s;--dx:${b.dx}px;--dy:${b.dy}px"></span>`)
+    .join("");
+}
+
+function clearModelSplit() {
+  if (modelSplitBg) {
+    modelSplitBg.remove();
+    modelSplitBg = null;
+  }
+  delete document.documentElement.dataset.screen;
+  delete document.documentElement.dataset.merged;
+  const root = document.documentElement.style;
+  SPLIT_VARS.forEach((name) => root.removeProperty(name));
+}
+
 function referencesTheme() {
   const selected = state.references;
   if (selected.length) {
@@ -294,30 +540,162 @@ function referencesTheme() {
 /* ---------------- Intro ---------------- */
 
 function mountIntro() {
+  // Edit mode rides the same code path as reduced motion: a static final frame, no
+  // entrance choreography, so the call-outs are stable to drag the moment they mount.
+  const reduce = ANATOMY_EDIT || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const half = INTRO_WORD.length / 2;
+  const letters = INTRO_WORD.split("").map((char, index) => {
+    const fromLeft = index < half;
+    const fromAbove = index % 2 === 0;
+    const yBase = fromAbove ? -128 : 128;
+    const exitBase = fromAbove ? 128 : -128;
+    const yJitter = INTRO_Y_JITTER[index] || 0;
+    const entryX = fromLeft ? "-70vw" : "70vw";
+    const exitX = fromLeft ? "-82vw" : "82vw";
+    const turnY = `${yBase + yJitter}px`;
+    const exitY = `${exitBase + yJitter}px`;
+    return `<span class="intro-letter" style="--i:${index};--entry-x:${entryX};--turn-y:${turnY};--exit-x:${exitX};--exit-y:${exitY}">${esc(char)}</span>`;
+  }).join("");
+
   app.innerHTML = `
-    <div class="intro" data-action="skip-intro">
-      <div class="intro-grid"></div>
-      <div class="intro-stage">
-        <div class="intro-spark"></div>
-        <h1 class="intro-wordmark">Tasteprint</h1>
-        <p class="intro-sub">A design file your agent can follow.</p>
+    <div class="intro ${reduce ? "is-static" : ""}">
+      <div class="intro-field" id="introField">
+        <div class="intro-grid"></div>
+        <div class="intro-grid-glow"></div>
       </div>
-      <button class="intro-skip" data-action="skip-intro">Skip</button>
+      <div class="intro-stage" id="introStage">
+        <h1 class="intro-wordmark" aria-label="${esc(INTRO_WORD)}">${letters}</h1>
+        <button class="intro-cta" data-action="start-designing" style="--cta-delay:${INTRO_CTA_DELAY}ms">
+          <span class="intro-cta-label">Start Designing</span>
+        </button>
+        ${introAnatomyHtml()}
+      </div>
     </div>
   `;
 
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  clearTimeout(introTimer);
-  introTimer = setTimeout(advanceFromIntro, reduce ? 600 : 2300);
+  clearIntroTimers();
+
+  const intro = app.querySelector(".intro");
+  const field = app.querySelector("#introField");
+  if (intro && field && !reduce) {
+    introMoveTarget = intro;
+    introMoveHandler = (event) => {
+      const rect = field.getBoundingClientRect();
+      field.style.setProperty("--mx", `${event.clientX - rect.left}px`);
+      field.style.setProperty("--my", `${event.clientY - rect.top}px`);
+    };
+    intro.addEventListener("pointermove", introMoveHandler);
+  }
+
+  // The anatomy blueprint reveals on hover OR focus of the CTA — JS toggle (not a
+  // pure CSS sibling selector) so keyboard focus gets parity and reduced-motion can
+  // show it without movement. The whole intro tears down on advance, so these
+  // listeners ride along with the discarded nodes; no manual cleanup needed.
+  const cta = app.querySelector(".intro-cta");
+  const anatomy = app.querySelector(".intro-anatomy");
+  if (cta && anatomy) {
+    const reveal = () => anatomy.classList.add("is-revealed");
+    const hide = () => anatomy.classList.remove("is-revealed");
+    cta.addEventListener("pointerenter", reveal);
+    cta.addEventListener("pointerleave", hide);
+    cta.addEventListener("focus", reveal);
+    cta.addEventListener("blur", hide);
+  }
+
+  // Edit mode: pin the blueprint open and hand the stage to the draggable editor.
+  if (ANATOMY_EDIT && anatomy) {
+    anatomy.classList.add("is-revealed");
+    import("./anatomy-editor.js")
+      .then((module) => module.mountAnatomyEditor(app))
+      .catch((error) => console.error("Anatomy editor failed to load:", error));
+  }
+
+  // No auto-advance: the entrance plays on mount, then the intro waits for the
+  // Start Designing click (or the Esc fast-path). Reduced motion shows the final
+  // frame + button immediately and likewise waits.
+}
+
+// A blueprint that snaps in on CTA hover/focus and annotates the page's own design
+// tokens. Seven call-outs form a page-spec diagram anchored to the real geometry of
+// the wordmark + CTA: the type face (off the "T"), cap height, tracking (off the
+// final "t"), baseline, the accent that lives on the button, the primary action's
+// width, and the canvas grid. Leaders are mostly orthogonal with two diagonals, so
+// it scans like a design-tool inspection layer. aria-hidden + pointer-events none.
+function introAnatomyHtml() {
+  return `
+    <div class="intro-anatomy" aria-hidden="true">
+      <div class="bp bp-type" style="--n:0">
+        <span class="bp-dot"></span>
+        <span class="bp-leader"></span>
+        <span class="bp-tag"><i class="bp-sw" style="--c:var(--ink)"></i>Display / 650</span>
+      </div>
+      <div class="bp bp-cap" style="--n:1">
+        <span class="bp-vbracket"></span>
+        <span class="bp-tag">Cap height</span>
+      </div>
+      <div class="bp bp-track" style="--n:2">
+        <span class="bp-dot"></span>
+        <span class="bp-leader"></span>
+        <span class="bp-tag">Tracking -0.04em</span>
+      </div>
+      <div class="bp bp-base" style="--n:3">
+        <span class="bp-dot"></span>
+        <span class="bp-leader"></span>
+        <span class="bp-tag">Baseline</span>
+      </div>
+      <div class="bp bp-accent" style="--n:4">
+        <span class="bp-dot"></span>
+        <span class="bp-leader"></span>
+        <span class="bp-tag"><i class="bp-sw" style="--c:var(--primary)"></i>Accent / primary</span>
+      </div>
+      <div class="bp bp-action" style="--n:5">
+        <span class="bp-bracket"></span>
+        <span class="bp-leader"></span>
+        <span class="bp-tag">Primary action</span>
+      </div>
+      <div class="bp bp-grid-note" style="--n:6">
+        <span class="bp-ring"></span>
+        <span class="bp-leader"></span>
+        <span class="bp-tag"><i class="bp-sw bp-sw-ring" style="--c:var(--canvas)"></i>Canvas / 44px</span>
+      </div>
+    </div>
+  `;
+}
+
+function clearIntroTimers() {
+  introTimers.forEach(clearTimeout);
+  introTimers = [];
+  if (introMoveTarget && introMoveHandler) {
+    introMoveTarget.removeEventListener("pointermove", introMoveHandler);
+  }
+  introMoveTarget = null;
+  introMoveHandler = null;
 }
 
 function advanceFromIntro() {
   if (state.step !== "intro") {
     return;
   }
-  clearTimeout(introTimer);
+  clearIntroTimers();
   state.introSeen = true;
   go("models");
+}
+
+// Click-out: fly the letters out and fade the CTA / grid / anatomy together, then
+// hand off to models once the exit completes. Reduced motion skips straight across.
+function exitIntro() {
+  if (state.step !== "intro") {
+    return;
+  }
+  const intro = app.querySelector(".intro");
+  const stage = app.querySelector("#introStage");
+  if (prefersReducedMotion() || !intro || !stage) {
+    return advanceFromIntro();
+  }
+  clearIntroTimers();
+  intro.classList.add("is-leaving");
+  stage.classList.add("is-exiting");
+  introTimers.push(setTimeout(advanceFromIntro, INTRO_EXIT_DURATION));
 }
 
 /* ---------------- Loader ---------------- */
@@ -378,43 +756,66 @@ function flashLimit(screen, footer) {
 
 /* ---------------- Step renderers (return descriptors) ---------------- */
 
-function renderModels() {
-  const installedCount = state.availableModels.filter((model) => !model.fallback).length;
+// Role copy lives here so each card reads like an editorial "role object" — a
+// purpose caption next to the marker, then a one-line explanation of the job.
+const MODEL_ROLE_COPY = {
+  primary: { name: "Primary", caption: "Drives synthesis", purpose: "The lead model. It reads everything and writes your DESIGN.md." },
+  secondary: { name: "Secondary", caption: "Asks you the questions", purpose: "Optional. A second voice for critique, comparison, or interview." }
+};
 
+function renderModels() {
   return {
-    eyebrow: "Model setup",
-    title: "Choose your models.",
-    helper: "A primary model for synthesis, a secondary for the interview.",
+    centered: true,
+    wide: true,
+    eyebrow: stepEyebrow(),
+    titleHtml: splitText("Choose your model pair."),
+    title: "Choose your model pair.",
+    helper: "Pick a primary model for synthesis and an optional secondary for challenge, comparison, or the interview.",
+    bodyClass: "model-body",
     body: `
       ${state.error ? errorHtml(state.error) : ""}
-      ${installedCount || state.localOnly ? "" : noticeHtml("No supported CLI model was detected on PATH. You can still run the full onboarding in local draft mode.")}
-      <div class="model-grid">
-        ${renderModelSelector("primary", "Primary", "Synthesizes directions and writes the files.")}
-        ${renderModelSelector("secondary", "Secondary", "Runs the interview and reads references.")}
-      </div>
-      <div class="panel" style="margin-top:16px">
-        <div class="label">Output directory</div>
-        <p class="helper small"><code>${esc(state.projectDir || "Current directory")}</code></p>
+      <div class="model-stage">
+        <div class="model-card-wrap primary">${renderModelSelector("primary")}</div>
+        <div class="model-card-wrap secondary">${renderModelSelector("secondary")}</div>
       </div>
     `,
-    footer: footerHtml({ primaryLabel: "Start", primaryAction: "start-intake", side: "npx tasteprint" })
+    footer: footerHtml({ primaryLabel: "Start the interview", primaryAction: "start-intake", side: "npx tasteprint", modelCta: true, arrow: true })
   };
 }
 
-function renderModelSelector(role, title, helper) {
+function renderModelSelector(role) {
+  const copy = MODEL_ROLE_COPY[role] || MODEL_ROLE_COPY.primary;
+  return `
+    <div class="panel model-card ${role}">
+      <div class="model-head">
+        <div class="model-role"><span class="role-dot"></span><span class="role-name">${esc(copy.name)}</span></div>
+        <span class="role-caption">${esc(copy.caption)}</span>
+      </div>
+      <p class="model-purpose">${esc(copy.purpose)}</p>
+      ${modelFieldsHtml(role)}
+    </div>
+  `;
+}
+
+// The three selects for one card. Extracted so a model change can swap just this
+// block in place (keeping the card + wrap elements alive), which avoids the float
+// restart / focus-loss jump a full screen re-render caused.
+function modelFieldsHtml(role) {
   const selected = state.models[role] || modelWithDefaults(state.availableModels[0]);
-  const modelOptions = state.availableModels
-    .map((model) => `<option value="${esc(model.id)}" ${selected?.id === model.id ? "selected" : ""}>${esc(model.label)}${!model.fallback && model.path && !model.localOnly ? " · detected" : ""}</option>`)
+  const allowed = state.availableModels.filter((model) => ALLOWED_MODEL_IDS.includes(model.id));
+  const pool = allowed.length ? allowed : state.availableModels;
+  const modelOptions = pool
+    .map((model) => `<option value="${esc(model.id)}" ${selected?.id === model.id ? "selected" : ""}>${esc(model.label)}</option>`)
     .join("");
-  const variants = selected?.variants?.length ? selected.variants : [];
-  const selectedVariant = selected?.variant || variants[0];
+  // Drop the "custom model id" pseudo-variant — the model screen stays to the
+  // three first-party CLIs and their published model ids only.
+  const variants = (selected?.variants?.length ? selected.variants : []).filter((variant) => !variant.custom);
+  const selectedVariant = (selected?.variant && !selected.variant.custom) ? selected.variant : variants[0];
   const thinkingOptions = selectedVariant?.thinkingOptions?.length ? selectedVariant.thinkingOptions : selected?.thinkingOptions || [];
   const selectedThinking = selected?.thinking || thinkingOptions[0];
-  const custom = selectedVariant?.custom || selectedVariant?.id === "custom";
 
   return `
-    <div class="panel model-panel">
-      <div class="model-role"><span class="role-dot ${role}"></span>${esc(title)}</div>
+    <div class="model-fields">
       <div class="field">
         <label class="label" for="${role}Model">Model</label>
         <select class="select" id="${role}Model" data-bind-model="${esc(role)}">${modelOptions}</select>
@@ -425,25 +826,35 @@ function renderModelSelector(role, title, helper) {
           ${variants.map((variant) => `<option value="${esc(variant.id)}" ${selectedVariant?.id === variant.id ? "selected" : ""}>${esc(variant.label)}</option>`).join("")}
         </select>
       </div>
-      ${custom ? `
-        <div class="field">
-          <label class="label" for="${role}CustomModel">Custom model id</label>
-          <input class="input" id="${role}CustomModel" data-bind-custom-model="${esc(role)}" value="${esc(selected.customModelId || "")}" placeholder="gpt-5.5, opus, provider/model" />
-        </div>
-      ` : ""}
       <div class="field">
         <label class="label" for="${role}Thinking">Thinking</label>
         <select class="select" id="${role}Thinking" data-bind-model-thinking="${esc(role)}">
           ${thinkingOptions.map((option) => `<option value="${esc(option.id)}" ${selectedThinking?.id === option.id ? "selected" : ""}>${esc(option.label)}</option>`).join("")}
         </select>
       </div>
-      <p class="helper small">${esc(helper)}</p>
-      <div class="model-meta">
-        <span>${esc(selectedVariant?.description || "Use the selected CLI configuration.")}</span>
-        <span>${usageTextForSelection(selected, role)}</span>
-      </div>
     </div>
   `;
+}
+
+// Update one model card without re-rendering the whole screen. Swaps just the selects
+// (so the variant/thinking options track the new model), crossfades the world vars,
+// and fires the acknowledgement pulse — all while the card + wrap DOM stay put, so the
+// idle float keeps running and the surface eases instead of snapping.
+function refreshModelCard(role) {
+  const fields = document.querySelector(`.panel.model-card.${role} .model-fields`);
+  if (!fields) {
+    return refresh();
+  }
+  fields.outerHTML = modelFieldsHtml(role);
+  updateModelSplit();
+  syncSelectValues();
+  const card = document.querySelector(`.panel.model-card.${role}`);
+  if (card && !prefersReducedMotion()) {
+    card.classList.remove("is-acked");
+    void card.offsetWidth;
+    card.classList.add("is-acked");
+    setTimeout(() => card.classList.remove("is-acked"), 300);
+  }
 }
 
 function renderIntake() {
@@ -923,6 +1334,19 @@ function swatchRow(direction) {
   return `<div class="swatch-row">${swatches}</div>`;
 }
 
+// Renders text that is sliced along a diagonal seam: the left wedge takes --sl,
+// the right wedge takes --sr. Off the model screen those vars are unset, so both
+// wedges fall back to currentColor and it reads as ordinary text. When the two
+// chosen models match, --sl === --sr and the seam disappears.
+function splitText(text) {
+  const safe = esc(text);
+  return `<span class="split-text"
+    ><span class="split-base">${safe}</span
+    ><span class="split-layer left" aria-hidden="true">${safe}</span
+    ><span class="split-layer right" aria-hidden="true">${safe}</span
+  ></span>`;
+}
+
 function choiceCard({ label, description, selected, action, value, extraClass = "", htmlDescription = false }) {
   return `
     <button class="choice-card ${selected ? "selected" : ""} ${extraClass}" data-action="${esc(action)}" data-value="${esc(value)}" aria-pressed="${selected}">
@@ -932,14 +1356,15 @@ function choiceCard({ label, description, selected, action, value, extraClass = 
   `;
 }
 
-function footerHtml({ primaryLabel, primaryAction, primaryDisabled = false, backAction, side = "", counter = "" }) {
+function footerHtml({ primaryLabel, primaryAction, primaryDisabled = false, backAction, side = "", counter = "", modelCta = false, arrow = false }) {
+  const classes = ["button", "primary", modelCta ? "model-cta" : "", arrow ? "has-arrow" : ""].filter(Boolean).join(" ");
   return `
     <div class="footer-side">
       ${backAction ? `<button class="button ghost" data-action="${esc(backAction)}">Back</button>` : ""}
       ${counter ? `<span class="counter-chip">${esc(counter)}</span>` : ""}
-      ${side ? `<span>${esc(side)}</span>` : ""}
+      ${side ? `<span class="footer-note">${esc(side)}</span>` : ""}
     </div>
-    ${primaryLabel ? `<button class="button primary" data-action="${esc(primaryAction)}" ${primaryDisabled ? "disabled" : ""}>${esc(primaryLabel)}</button>` : ""}
+    ${primaryLabel ? `<button class="${classes}" data-action="${esc(primaryAction)}" ${primaryDisabled ? "disabled" : ""}><span class="btn-label">${esc(primaryLabel)}</span></button>` : ""}
   `;
 }
 
@@ -1032,7 +1457,9 @@ function bindAppEvents() {
   app.addEventListener("change", onChange);
 
   document.addEventListener("keydown", (event) => {
-    if (state.step === "intro" && (event.key === "Escape" || event.key === "Enter" || event.key === " ")) {
+    // Esc is the quiet a11y fast-path straight to models. Enter/Space are left to the
+    // browser so they activate the focused Start Designing CTA (with the exit motion).
+    if (state.step === "intro" && event.key === "Escape") {
       advanceFromIntro();
     }
   });
@@ -1078,7 +1505,7 @@ function onChange(event) {
     const role = element.dataset.bindModel;
     state.models[role] = modelWithDefaults(state.availableModels.find((model) => model.id === element.value));
     state.usage[role] = null;
-    refresh();
+    refreshModelCard(role);
     return;
   }
   if (element.dataset.bindModelVariant) {
@@ -1090,7 +1517,7 @@ function onChange(event) {
       model.thinking = defaultThinkingFor(model, variant);
       state.usage[role] = null;
     }
-    refresh();
+    refreshModelCard(role);
     return;
   }
   if (element.dataset.bindModelThinking) {
@@ -1101,6 +1528,7 @@ function onChange(event) {
       model.thinking = options.find((item) => item.id === element.value) || options[0];
       state.usage[role] = null;
     }
+    refreshModelCard(role);
   }
 }
 
@@ -1122,8 +1550,13 @@ async function handleAction(action, value) {
 
   try {
     switch (action) {
-      case "skip-intro":
-        return advanceFromIntro();
+      case "start-designing":
+        // In the anatomy editor the accent dot lives on this button — swallow the
+        // click so dragging it never navigates away from the tool.
+        if (ANATOMY_EDIT) {
+          return;
+        }
+        return exitIntro();
       case "start-intake":
         return go("intake");
       case "back-models":
@@ -1488,6 +1921,14 @@ function formatTokens(value) {
     return `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}k`;
   }
   return String(number);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 async function getJson(path) {

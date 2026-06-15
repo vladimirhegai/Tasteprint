@@ -13,6 +13,7 @@ Options:
   --port <port>      Port to try first. Default: 4317
   --no-open          Do not open the browser automatically
   --local-only       Run the onboarding with local fallback logic only
+  --anatomy          Open the intro anatomy editor (dev tool, implies --local-only)
   --help             Show this help
 
 Generated files are written to the directory where you run the command.
@@ -36,6 +37,10 @@ function parseArgs(argv) {
       options.open = false;
     } else if (arg === "--local-only") {
       options.localOnly = true;
+    } else if (arg === "--anatomy") {
+      // Dev tool: deterministic + auto-open straight onto the editor.
+      options.localOnly = true;
+      options.openPath = "/?anatomy=1";
     } else if (arg === "--host") {
       options.host = argv[index + 1] || options.host;
       index += 1;
