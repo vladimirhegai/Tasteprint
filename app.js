@@ -1,6 +1,7 @@
 import { applyTheme, BASE_THEME, buildTheme } from "./theme.js";
 import { ensureContrast, contrastRatio, mixHex } from "./color.js";
 import { archetypeForGroup, brandForReference, MOOD_THEMES } from "./themes.db.js";
+import { syncModelEffects, destroyModelEffects } from "./modelEffects.js";
 
 const app = document.querySelector("#app");
 
@@ -54,10 +55,11 @@ const ALLOWED_MODEL_IDS = ["codex", "claude", "gemini"];
 //            saturation so two worlds blend rather than collide), two bloom tones
 //            (the slow drifting luminosity), a near-white card, ink/hairline/accent,
 //            a glow, and a radius that nudges the feel.
-//   EFFECT — the model's signature motion language, keyed independently of colour:
-//     codex  → grid    : precise / technical — a faint structural baseline grid
-//     gemini → dots     : airy / cosmic — a drifting dot cloud, ideas suspended in air
-//     claude → bubbles  : warm / human — soft tinted bubbles rising and gathering
+//   EFFECT — the model's signature canvas motion, keyed independently of colour and
+//            mounted by public/modelEffects.js (tuning lives in MODEL_EFFECT_CONFIG):
+//     codex  → faulty-terminal : precise / technical — a low glyph + scanline texture
+//     gemini → antigravity     : airy / cosmic — suspended particles, a cursor-drawn ring
+//     claude → metaballs       : warm / human — soft blobs that merge across the field
 // Fields are deliberately pale so the seam between two worlds reads as a gentle
 // editorial field change. Ratios checked with the internal color tool
 // (src/colorTools.js): ink/card 13–14:1, muted/card ~5:1.
@@ -65,17 +67,17 @@ const MODEL_WORLDS = {
   codex: {
     bg: "#DDEDE5", field1: "#EAF4EF", field2: "#D3E8DD", bloom1: "#9FDDC4", bloom2: "#C2EAD8",
     card: "#F3F7F4", ink: "#16271F", inkMuted: "#5A6F64", hairline: "#C5DFD4",
-    accent: "#1F9D78", glow: "rgba(31, 157, 120, 0.16)", radius: "10px", effect: "grid"
+    accent: "#1F9D78", glow: "rgba(31, 157, 120, 0.16)", radius: "10px", effect: "faulty-terminal"
   },
   claude: {
     bg: "#EBDDCC", field1: "#F3EADF", field2: "#E7D7C6", bloom1: "#EBC9A6", bloom2: "#E5D2BC",
     card: "#F8F1E8", ink: "#3A2516", inkMuted: "#74583F", hairline: "#E0CBB3",
-    accent: "#C97A3D", glow: "rgba(201, 122, 61, 0.16)", radius: "22px", effect: "bubbles"
+    accent: "#C97A3D", glow: "rgba(201, 122, 61, 0.16)", radius: "22px", effect: "metaballs"
   },
   gemini: {
     bg: "#DEE2FB", field1: "#EAECFD", field2: "#D6DBFA", bloom1: "#BCC4FF", bloom2: "#CDBEF7",
     card: "#F1F2FC", ink: "#1B1E3C", inkMuted: "#565C8A", hairline: "#C9CEF3",
-    accent: "#4F5BD5", glow: "rgba(79, 91, 213, 0.18)", radius: "16px", effect: "dots"
+    accent: "#4F5BD5", glow: "rgba(79, 91, 213, 0.18)", radius: "16px", effect: "antigravity"
   }
 };
 
@@ -416,23 +418,16 @@ function updateModelSplit() {
     modelSplitBg.setAttribute("aria-hidden", "true");
     // Two atmospheres + a soft seam sheen. The secondary layer is masked to the
     // bottom-right and feathered across the diagonal, so the worlds dissolve into
-    // each other instead of meeting at a hard edge. Each layer carries a slow
-    // flowing-gradient base, drifting blooms, and all three effect layers (grid /
-    // dots / bubbles) — only the active one is opaque, so a model swap crossfades
-    // the effect. All motion is CSS.
+    // each other instead of meeting at a hard edge. Each layer carries a slow CSS
+    // flowing-gradient base, drifting blooms, and one effect stage (.fx-stage) into
+    // which modelEffects.js mounts the side's canvas effect.
     modelSplitBg.innerHTML = `
-      <div class="atmos atmos-primary">${atmosLayersHtml()}</div>
-      <div class="atmos atmos-secondary">${atmosLayersHtml()}</div>
+      <div class="atmos atmos-primary">${atmosLayersHtml("primary")}</div>
+      <div class="atmos atmos-secondary">${atmosLayersHtml("secondary")}</div>
       <div class="model-seam"></div>`;
     app.prepend(modelSplitBg);
     requestAnimationFrame(() => modelSplitBg?.classList.add("is-on"));
   }
-
-  // Effect language is chosen per side independently of colour; colours below ride
-  // typed CSS vars so a dropdown change eases from one palette to the next, while the
-  // effect layers crossfade via the data-effect hook.
-  modelSplitBg.querySelector(".atmos-primary")?.setAttribute("data-effect", primary.effect);
-  modelSplitBg.querySelector(".atmos-secondary")?.setAttribute("data-effect", secondary.effect);
 
   document.documentElement.dataset.screen = "models";
   document.documentElement.dataset.merged = merged ? "true" : "false";
@@ -470,50 +465,30 @@ function updateModelSplit() {
   // Split-text wedges: left wins the primary ink, right the secondary ink.
   root.setProperty("--sl", primary.ink);
   root.setProperty("--sr", secondary.ink);
+
+  // EFFECT world: mount / crossfade each side's canvas effect into its .fx-stage. The
+  // colour above rides typed CSS vars; this hands the per-side effect + merge state to
+  // the controller manager (which destroys the secondary effect when the worlds merge).
+  syncModelEffects(modelSplitBg, {
+    primary: primary.effect,
+    secondary: secondary.effect,
+    merged
+  });
 }
 
-// One atmosphere's layer stack, bottom → top: a slow flowing-gradient base, two
-// drifting blooms, then the three effect layers. data-effect on the parent decides
-// which effect layer is visible; the others sit at opacity 0 and crossfade on swap.
-function atmosLayersHtml() {
+// One atmosphere's layer stack, bottom → top: a slow CSS flowing-gradient base, two
+// drifting blooms, then the effect stage. modelEffects.js mounts the side's canvas
+// effect into the .fx-stage and crossfades it on a model swap.
+function atmosLayersHtml(side) {
   return `
     <div class="atmos-flow"></div>
     <div class="atmos-blob blob-a"></div>
     <div class="atmos-blob blob-b"></div>
-    <div class="fx fx-grid"></div>
-    <div class="fx fx-dots"></div>
-    <div class="fx fx-bubbles">${bubblesHtml()}</div>`;
-}
-
-// Claude's signature: soft, blurred, tinted bubbles that float, breathe, and drift
-// gently in place. Spread across the WHOLE field (both diagonal halves) via per-bubble
-// top/left so that, once each side's mask clips it to its own section, the primary
-// (top-left) and secondary (bottom-right) each get a balanced handful — and when BOTH
-// sides are Claude the bubbles fill the entire field. Varied size / position / speed /
-// phase / drift so they never march in lockstep. Few and subtle — not a lava lamp.
-function bubblesHtml() {
-  const bubbles = [
-    // Top-left cluster — shown when the PRIMARY side is Claude.
-    { size: 62, left: 10, top: 20, dur: 17, delay: 0, dx: 14, dy: -20 },
-    { size: 34, left: 26, top: 44, dur: 22, delay: 6, dx: -12, dy: -16 },
-    { size: 78, left: 15, top: 67, dur: 19, delay: 11, dx: 10, dy: -24 },
-    { size: 30, left: 40, top: 26, dur: 24, delay: 3, dx: -8, dy: -18 },
-    { size: 48, left: 33, top: 78, dur: 16, delay: 9, dx: 16, dy: -14 },
-    { size: 26, left: 46, top: 54, dur: 26, delay: 14, dx: 12, dy: -22 },
-    // Bottom-right cluster — shown when the SECONDARY side is Claude.
-    { size: 56, left: 60, top: 48, dur: 18, delay: 4, dx: -14, dy: -18 },
-    { size: 32, left: 76, top: 30, dur: 23, delay: 10, dx: 12, dy: -20 },
-    { size: 70, left: 70, top: 72, dur: 20, delay: 2, dx: -10, dy: -16 },
-    { size: 28, left: 88, top: 54, dur: 25, delay: 7, dx: 10, dy: -24 },
-    { size: 46, left: 58, top: 82, dur: 17, delay: 13, dx: 14, dy: -14 },
-    { size: 38, left: 85, top: 80, dur: 21, delay: 8, dx: -12, dy: -22 }
-  ];
-  return bubbles
-    .map((b) => `<span class="bubble" style="--size:${b.size}px;--left:${b.left}%;--top:${b.top}%;--dur:${b.dur}s;--delay:-${b.delay}s;--dx:${b.dx}px;--dy:${b.dy}px"></span>`)
-    .join("");
+    <div class="fx-stage" data-side="${side}"></div>`;
 }
 
 function clearModelSplit() {
+  destroyModelEffects();
   if (modelSplitBg) {
     modelSplitBg.remove();
     modelSplitBg = null;
