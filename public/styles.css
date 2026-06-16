@@ -511,6 +511,16 @@ button {
   background: transparent;
 }
 
+/* The headline + supporting line sit directly on the coloured field (no card behind
+   them), so the default muted greys read as faint. Darken them here for real contrast
+   against the atmosphere. */
+:root[data-screen="models"] .helper {
+  color: color-mix(in srgb, var(--ink) 72%, var(--ink-muted));
+}
+:root[data-screen="models"] .eyebrow {
+  color: color-mix(in srgb, var(--ink) 58%, var(--ink-muted));
+}
+
 :root[data-screen="models"] .bottom-bar {
   background: linear-gradient(to top, color-mix(in srgb, var(--p-side) 55%, transparent), transparent);
 }
@@ -1007,6 +1017,323 @@ button {
   height: 9px;
   border-radius: 999px;
   background: var(--card-accent, var(--primary));
+}
+
+/* =====================================================================
+   Per-model card identities
+   ---------------------------------------------------------------------
+   Same size, same fields, same clarity — wildly different *register*. Each
+   card adopts the chosen model's typeface and surface, keyed off the
+   [data-model] attribute (written by updateModelSplit()):
+     codex  → a terminal shell  (Geist Mono, scanlines, a typed echo line)
+     claude → an editorial folio (Newsreader serif, ink-on-paper, drop cap)
+     gemini → a frosted glass lens (Outfit, backdrop blur, shimmering name)
+   The key swaps instantly; the world colour, accent and effect crossfade
+   around it (handled by the existing --p-*/--s-* var transitions). The
+   font swap can't tween — that's expected and reads as a clean change.
+   ===================================================================== */
+
+.model-card[data-model] {
+  font-family: var(--model-font, var(--font-sans));
+}
+.model-card[data-model="codex"]  { --model-font: "Geist Mono", "JetBrains Mono", var(--font-mono); }
+.model-card[data-model="claude"] { --model-font: "Newsreader", Georgia, "Times New Roman", serif; }
+.model-card[data-model="gemini"] { --model-font: "Outfit", "Plus Jakarta Sans", var(--font-sans); }
+
+/* Form controls don't inherit font by default — pull the model face into the
+   text, labels and selects so the whole card speaks one voice. */
+.model-card[data-model] .role-name,
+.model-card[data-model] .role-caption,
+.model-card[data-model] .model-purpose,
+.model-card[data-model] .label,
+.model-card[data-model] .select,
+.model-card[data-model] .model-echo {
+  font-family: inherit;
+}
+
+/* ---- Codex — terminal shell -------------------------------------------------
+   A light terminal: faint phosphor scanlines over the card, a title-bar of
+   traffic lights, lowercase ❯-prompt labels, and a typed echo of the model id. */
+.panel.model-card[data-model="codex"] {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card-accent) 5%, transparent), transparent 120px),
+    var(--card-bg);
+}
+
+.model-card[data-model="codex"] .role-dot {
+  border-radius: 50%;
+  background: #e5604d;                                  /* the three terminal traffic lights */
+  box-shadow: 14px 0 0 #e6b043, 28px 0 0 #43b884;
+  margin-right: 30px;
+}
+.model-card[data-model="codex"] .role-name {
+  text-transform: lowercase;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+.model-card[data-model="codex"] .role-name::before {
+  content: "~/";
+  opacity: 0.5;
+}
+.model-card[data-model="codex"] .role-caption {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  opacity: 0.72;
+}
+.model-card[data-model="codex"] .role-caption::before {
+  content: "// ";
+  opacity: 0.55;
+}
+.model-card[data-model="codex"] .model-purpose {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.model-card[data-model="codex"] .label {
+  text-transform: lowercase;
+  letter-spacing: 0;
+  font-weight: 500;
+  opacity: 0.74;
+}
+.model-card[data-model="codex"] .label::before {
+  content: "\276F\00a0";                               /* ❯ prompt */
+  color: var(--card-accent);
+  opacity: 0.9;
+}
+.model-card[data-model="codex"] .select {
+  border-radius: 6px;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  background: color-mix(in srgb, var(--card-bg) 78%, #ffffff);
+}
+
+/* The echo line — Codex "prints" the chosen model id and re-types it on a swap.
+   Hidden entirely for the other two models. */
+.model-echo {
+  display: none;
+}
+.panel.model-card[data-model="codex"] .model-echo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--card-accent) 16%, var(--card-hairline));
+  font-size: 12px;
+  color: var(--card-ink-muted, var(--ink-muted));
+  white-space: nowrap;
+  overflow: hidden;
+}
+.model-echo .echo-prompt {
+  color: var(--card-accent);
+  font-weight: 600;
+}
+.model-echo .echo-text {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: calc(var(--len, 24) * 1ch);
+  color: var(--card-ink);
+}
+.model-echo .echo-caret {
+  flex: none;
+  width: 7px;
+  height: 14px;
+  background: var(--card-accent);
+  opacity: 0.85;
+  animation: codex-caret 1.05s steps(1) infinite;
+}
+@keyframes codex-caret {
+  50% { opacity: 0; }
+}
+
+/* Replay on swap (.is-typing toggled by refreshModelCard) and on first reveal. */
+.model-echo .echo-text.is-typing,
+.model-stage.is-entering .panel.model-card[data-model="codex"] .echo-text {
+  animation: codex-type 460ms steps(var(--len, 24)) both;
+}
+@keyframes codex-type {
+  from { max-width: 0; }
+  to   { max-width: calc(var(--len, 24) * 1ch); }
+}
+
+/* ---- Claude — editorial folio ------------------------------------------------
+   Premium ink settling into heavy paper: a serif face, a faint paper grain, a
+   small-caps masthead over a hairline rule, and a drop cap on the lead line. */
+.panel.model-card[data-model="claude"] {
+  background:
+    radial-gradient(135% 120% at 0% 0%, color-mix(in srgb, #ffffff 42%, transparent), transparent 58%),
+    var(--card-bg);
+}
+.model-card[data-model="claude"] .model-head {
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--card-accent) 22%, var(--card-hairline));
+}
+.model-card[data-model="claude"] .role-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  transform: rotate(45deg);                            /* an inked lozenge */
+}
+.model-card[data-model="claude"] .role-name {
+  font-variant: small-caps;
+  text-transform: lowercase;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+  font-size: 13px;
+}
+.model-card[data-model="claude"] .role-caption {
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 13px;
+}
+.model-card[data-model="claude"] .model-purpose {
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: color-mix(in srgb, var(--card-ink) 82%, var(--card-ink-muted));
+}
+/* A real drop cap on the hero only — the supporting card keeps a quieter lift. */
+.model-card.primary[data-model="claude"] .model-purpose::first-letter {
+  float: left;
+  font-size: 2.7em;
+  line-height: 0.82;
+  padding: 4px 9px 0 0;
+  font-weight: 600;
+  color: var(--card-accent);
+}
+.model-card.secondary[data-model="claude"] .model-purpose::first-letter {
+  font-weight: 600;
+}
+.model-card[data-model="claude"] .label {
+  font-variant: small-caps;
+  text-transform: lowercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  opacity: 0.8;
+}
+/* Ink-on-paper fields: an underline ruled line, no box. */
+.model-card[data-model="claude"] .select {
+  border: 1px solid transparent;
+  border-bottom: 1.5px solid color-mix(in srgb, var(--card-accent) 32%, var(--card-hairline));
+  border-radius: 0;
+  background: color-mix(in srgb, var(--card-bg) 55%, transparent);
+  font-size: 15px;
+  padding-left: 4px;
+}
+.model-card[data-model="claude"] .select:hover {
+  border-bottom-color: color-mix(in srgb, var(--card-accent) 55%, var(--card-hairline));
+}
+.model-card[data-model="claude"] .select:focus {
+  border-bottom-color: var(--card-accent);
+  box-shadow: 0 1.5px 0 0 var(--card-accent);
+}
+
+/* ---- Gemini — frosted glass lens --------------------------------------------
+   Fluid, light-speed, shimmering: a translucent pane that blurs the cosmic
+   field behind it, a glowing orbital marker, wide-tracked caps, and a slow
+   shimmer running through the masthead. */
+.panel.model-card[data-model="gemini"] {
+  background:
+    /* a sharp diagonal specular streak across the top-left */
+    linear-gradient(135deg,
+      color-mix(in srgb, #ffffff 62%, transparent) 0%,
+      color-mix(in srgb, #ffffff 8%, transparent) 30%,
+      transparent 58%),
+    /* a cool tint pulling the glass toward the world accent (not flat grey milk) */
+    linear-gradient(180deg, color-mix(in srgb, var(--card-accent) 12%, transparent), transparent 55%),
+    color-mix(in srgb, var(--card-bg) 70%, transparent);
+  /* push saturation + a touch of brightness so the cosmic field reads *through* the pane
+     instead of washing to milk; a deeper blur makes it a real frosted lens. The 70% fill
+     keeps it clearly legible (a near-transparent pane vanished into the field behind). */
+  backdrop-filter: blur(20px) saturate(1.7) brightness(1.05);
+  -webkit-backdrop-filter: blur(20px) saturate(1.7) brightness(1.05);
+}
+/* Glassy specular rim: a bright top edge + a thin light ring set inside the world's lift
+   glow. Per side so each keeps its own elevation depth (the inset rims replace the flat
+   hairline ring; the outer drop + accent glow stay). */
+.panel.model-card.primary[data-model="gemini"] {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 80%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 44%, transparent),
+    0 2px 10px rgba(15, 15, 18, 0.06),
+    0 30px 80px var(--card-glow);
+}
+.panel.model-card.secondary[data-model="gemini"] {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 72%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 40%, transparent),
+    0 1px 6px rgba(15, 15, 18, 0.05),
+    0 14px 40px var(--card-glow);
+}
+.model-card[data-model="gemini"] .role-dot {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--card-accent) 22%, transparent),
+    0 0 10px color-mix(in srgb, var(--card-accent) 60%, transparent);
+}
+.model-card[data-model="gemini"] .role-name {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 500;
+  font-size: 11px;
+  /* a slow shimmer sweeping the masthead */
+  background: linear-gradient(100deg,
+    var(--card-ink) 28%,
+    color-mix(in srgb, var(--card-accent) 80%, var(--card-ink)) 50%,
+    var(--card-ink) 72%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gemini-shimmer 6.5s linear infinite;
+}
+@keyframes gemini-shimmer {
+  to { background-position: -220% 0; }
+}
+.model-card[data-model="gemini"] .role-caption {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  font-size: 10.5px;
+}
+.model-card[data-model="gemini"] .model-purpose {
+  font-size: 13.5px;
+  line-height: 1.55;
+  font-weight: 300;
+  letter-spacing: 0.005em;
+}
+.model-card[data-model="gemini"] .label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  font-size: 10.5px;
+  opacity: 0.7;
+}
+.model-card[data-model="gemini"] .select {
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 400;
+  background: color-mix(in srgb, var(--card-bg) 56%, transparent);
+  border-color: color-mix(in srgb, #ffffff 55%, var(--card-hairline));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 55%, transparent);
+  backdrop-filter: blur(10px) saturate(1.5);
+  -webkit-backdrop-filter: blur(10px) saturate(1.5);
+}
+.model-card[data-model="gemini"] .select:hover {
+  background: color-mix(in srgb, var(--card-bg) 70%, transparent);
+  border-color: color-mix(in srgb, #ffffff 72%, var(--card-hairline));
+}
+
+/* Honour reduced motion: no caret blink, no typewriter, no shimmer. */
+@media (prefers-reduced-motion: reduce) {
+  .model-echo .echo-caret,
+  .model-echo .echo-text.is-typing,
+  .model-card[data-model="gemini"] .role-name {
+    animation: none;
+  }
+  .model-echo .echo-text { max-width: calc(var(--len, 24) * 1ch); }
 }
 
 /* Model CTA: a confident pill filled with the same primary→secondary blend as the
@@ -2335,5 +2662,179 @@ button {
      the composition, so drop it (it is decorative + aria-hidden anyway). */
   .intro-anatomy {
     display: none;
+  }
+}
+
+/* ---------- Not-detected gate (install popup) ----------
+   Shown when the interview starts with a CLI that isn't on PATH. A clean editorial
+   card over a blurred scrim — neutral tokens so it reads the same over any model
+   world. Fades + lifts in; reduced motion gets the end state with no transition. */
+.model-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  /* This is a "something's missing" warning, not a normal flow — so the emblem, links,
+     focus rings and primary button wear a warm red instead of the app's purple. Scoped
+     here so the override stays inside the gate. */
+  --primary: #cf4636;
+  --primary-hover: #b73a2c;
+  --primary-soft: #fbe7e3;
+  --primary-ink: #ffffff;
+}
+
+.model-gate-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 17, 20, 0.46);
+  backdrop-filter: blur(7px) saturate(108%);
+  -webkit-backdrop-filter: blur(7px) saturate(108%);
+  opacity: 0;
+  transition: opacity 260ms var(--ease);
+}
+
+.model-gate.is-open .model-gate-backdrop {
+  opacity: 1;
+}
+
+.model-gate-card {
+  position: relative;
+  width: min(440px, 100%);
+  background: var(--canvas-pure);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-soft);
+  padding: 28px 28px 22px;
+  opacity: 0;
+  transform: translateY(10px) scale(0.985);
+  transition: opacity 280ms var(--ease-out-soft), transform 280ms var(--ease-out-soft);
+}
+
+.model-gate.is-open .model-gate-card {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.gate-emblem {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.gate-emblem svg {
+  width: 22px;
+  height: 22px;
+}
+
+.gate-title {
+  margin: 16px 0 0;
+  font-size: 20px;
+  font-weight: var(--heading-weight);
+  letter-spacing: var(--heading-tracking);
+  line-height: 1.25;
+}
+
+.gate-lead {
+  margin: 8px 0 0;
+  color: var(--ink-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.gate-installs {
+  margin-top: 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.gate-installs-label {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-subtle);
+}
+
+.gate-install {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  text-decoration: none;
+  color: var(--ink);
+  background: var(--canvas-pure);
+  transition: border-color 160ms var(--ease), background 160ms var(--ease), transform 120ms var(--ease);
+}
+
+.gate-install:hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--hairline));
+  background: color-mix(in srgb, var(--primary) 5%, var(--canvas-pure));
+}
+
+.gate-install:active {
+  transform: scale(0.99);
+}
+
+.gate-install:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.gate-install-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gate-install-name {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.gate-install-url {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gate-install-arrow {
+  margin-left: auto;
+  color: var(--ink-subtle);
+  font-size: 15px;
+  transition: color 160ms var(--ease), transform 160ms var(--ease);
+}
+
+.gate-install:hover .gate-install-arrow {
+  color: var(--primary);
+  transform: translate(1px, -1px);
+}
+
+.gate-actions {
+  margin-top: 22px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-gate-backdrop,
+  .model-gate-card {
+    transition: none;
   }
 }

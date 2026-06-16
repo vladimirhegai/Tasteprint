@@ -56,11 +56,12 @@ const CANDIDATES = [
     executable: "claude",
     role: "Agentic coding CLI",
     defaultContextWindow: 200000,
+    // Variant labels are bare model tiers (the card already says "Claude Code"), and
+    // Fable is intentionally omitted.
     variants: () => [
-      modelVariant("opus", "Claude Opus", "opus", 200000, "Highest capability Claude Code alias."),
-      modelVariant("sonnet", "Claude Sonnet", "sonnet", 200000, "Balanced Claude Code alias."),
-      modelVariant("haiku", "Claude Haiku", "haiku", 200000, "Fast Claude Code alias."),
-      modelVariant("fable", "Claude Fable", "fable", 200000, "Current Claude Code alias when available.")
+      modelVariant("opus", "Opus", "opus", 200000, "Highest capability Claude Code alias."),
+      modelVariant("sonnet", "Sonnet", "sonnet", 200000, "Balanced Claude Code alias."),
+      modelVariant("haiku", "Haiku", "haiku", 200000, "Fast Claude Code alias.")
     ],
     thinkingOptions: CLAUDE_THINKING_OPTIONS,
     args: (prompt, selection) => [
@@ -153,30 +154,33 @@ const CANDIDATES = [
   }
 ];
 
-export function detectModels(options = {}) {
-  if (options.localOnly) {
-    return [
-      ...CANDIDATES.map((candidate) => buildModelDescriptor(candidate, {
-        path: findExecutable(candidate.executable),
-        forceAvailable: true,
-        localOnly: true
-      })),
-      localFallbackModel(true)
-    ];
-  }
+// The three first-party CLIs Tasteprint showcases. They are always offered on the
+// model screen — installed or not — so every user can preview their "world"; real PATH
+// presence rides each descriptor as `installed` and is only enforced once the interview
+// starts (see the not-detected gate in the UI).
+const SHOWCASED_IDS = ["codex", "claude", "gemini"];
 
-  const detected = CANDIDATES.map((candidate) => {
+export function detectModels(options = {}) {
+  const localOnly = Boolean(options.localOnly);
+  const unavailable = new Set(options.unavailable || []);
+
+  const descriptors = CANDIDATES.map((candidate) => {
+    const path = findExecutable(candidate.executable);
+    // dev:local treats everything as installed (deterministic, no install popup) unless a
+    // model is explicitly forced unavailable for testing; normal runs trust PATH.
+    const installed = (localOnly ? true : Boolean(path)) && !unavailable.has(candidate.id);
+    const showcased = SHOWCASED_IDS.includes(candidate.id);
     return buildModelDescriptor(candidate, {
-      path: findExecutable(candidate.executable),
-      forceAvailable: false,
-      localOnly: false
+      path,
+      // Showcased CLIs are always selectable; other CLIs appear only when installed.
+      forceAvailable: localOnly || showcased,
+      localOnly,
+      installed
     });
   });
 
-  return [
-    ...detected.filter((model) => model.available),
-    localFallbackModel(false)
-  ];
+  const visible = descriptors.filter((model) => SHOWCASED_IDS.includes(model.id) || model.available);
+  return [...visible, localFallbackModel(localOnly)];
 }
 
 export async function invokeModel(modelSelection, prompt, options = {}) {
@@ -274,6 +278,7 @@ function localFallbackModel(localOnly) {
     path: null,
     role: "Deterministic offline fallback",
     available: true,
+    installed: true,
     fallback: true,
     localOnly,
     variants: [
@@ -297,6 +302,9 @@ function buildModelDescriptor(candidate, options) {
     path,
     role: candidate.role,
     available: options.forceAvailable || Boolean(path),
+    // Real PATH presence, independent of `available` (which a showcased CLI forces true
+    // so it can be previewed). The UI gates the interview start on this.
+    installed: Boolean(options.installed),
     fileAware: candidate.fileAware,
     localOnly: options.localOnly,
     variants,

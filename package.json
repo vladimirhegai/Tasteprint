@@ -24,6 +24,7 @@
     "start": "node ./bin/tasteprint.js --no-open",
     "dev": "node ./bin/tasteprint.js --no-open --port 4317",
     "dev:local": "node ./bin/tasteprint.js --no-open --port 4317 --local-only",
+    "dev:no-models": "node ./bin/tasteprint.js --no-open --port 4317 --local-only --unavailable codex,claude,gemini",
     "dev:anatomy": "node ./bin/tasteprint.js --anatomy --port 4317",
     "test": "node --test test/*.test.js"
   },

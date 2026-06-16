@@ -34,6 +34,9 @@ export async function startServer(options) {
   const host = options.host || "127.0.0.1";
   const preferredPort = Number.isFinite(options.port) ? options.port : 4317;
   const localOnly = Boolean(options.localOnly);
+  // CLI ids forced to report as not-installed, so the not-detected gate can be exercised
+  // even in dev:local (e.g. `npm run dev:local -- --no-claude`).
+  const unavailable = Array.isArray(options.unavailable) ? options.unavailable : [];
 
   const server = createServer(async (request, response) => {
     try {
@@ -41,7 +44,8 @@ export async function startServer(options) {
         publicDir,
         projectDir,
         packageRootUrl,
-        localOnly
+        localOnly,
+        unavailable
       });
     } catch (error) {
       sendJson(response, 500, {
@@ -90,7 +94,7 @@ async function handleRequest(request, response, context) {
 
   if (request.method === "GET" && url.pathname === "/api/models") {
     return sendJson(response, 200, {
-      models: detectModels({ localOnly: context.localOnly })
+      models: detectModels({ localOnly: context.localOnly, unavailable: context.unavailable })
     });
   }
 
