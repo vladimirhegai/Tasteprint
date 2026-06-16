@@ -1036,7 +1036,7 @@ function renderModels() {
     eyebrow: stepEyebrow(),
     titleHtml: splitText("Choose your model pair."),
     title: "Choose your model pair.",
-    helper: "Pick a primary model to lead the design and a secondary for challenge, comparison, or the interview.",
+    helper: "Pick a primary model to lead the design and a secondary for challenge, comparison, and the interview.",
     bodyClass: "model-body",
     body: `
       ${state.error ? errorHtml(state.error) : ""}
