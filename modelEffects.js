@@ -34,7 +34,11 @@ export const MODEL_EFFECT_CONFIG = {
     // space stays transparent and the field blends instead of painting a black screen.
     tint: "#23C28C",
     scale: 1.7,
-    mergedScale: 2.1,
+    // Merged keeps the same scale as split: the .fx-stage is always full-viewport (split
+    // just masks the primary to the top-left), so dropping that mask on merge already
+    // reveals the rest of the SAME glyph field. Zooming the scale on top of that made the
+    // whole field jump on merge — the seamless reveal is what we want instead.
+    mergedScale: 1.7,
     gridMul: [2, 1],
     digitSize: 1.3,
     timeScale: 0.5,
@@ -45,10 +49,16 @@ export const MODEL_EFFECT_CONFIG = {
     curvature: 0.1,
     mouseStrength: 0.22,
     brightness: 1.0,
+    // Frame-rate-independent chase rate for the cursor glow (higher = snappier, less
+    // trailing lag). The old fixed `* 0.08` per frame felt laggy and, being tied to the
+    // frame count, tracked even worse at the 30fps cap. 16 keeps a hair of smoothing
+    // trail without the cursor falling behind. fpsCap lifted to 45 so the glow's
+    // position is sampled often enough that the follow reads as fluid, not stepped.
+    mouseFollowRate: 16,
     renderScale: 0.5,
     mobileRenderScale: 0.34,
     maxCanvasPixels: 480000,
-    fpsCap: 30,
+    fpsCap: 45,
     opacity: 0.5,
     dprCap: 1.2
   },
@@ -331,10 +341,11 @@ class CanvasEffect {
 
 // Shared so a re-mount (model swapped away and back, or a merge that rebuilds the side)
 // resumes the drift phase and keeps the cursor where it was instead of snapping the
-// field to t=0 with the ring jumping to the centre. Cursor is stored normalised so it
-// survives a resize. Mirrors META_EPOCH / META_CURSOR_BY_SIDE.
+// field to t=0 with the ring jumping to the centre. ONE shared cursor slot (not per side)
+// so a merge that moves the field secondary→primary keeps the ring continuous. Stored
+// normalised so it survives a resize. Mirrors META_EPOCH / META_CURSOR.
 const GEMINI_EPOCH = (typeof performance !== "undefined" ? performance.now() : Date.now());
-const GEMINI_CURSOR_BY_SIDE = { primary: null, secondary: null };
+let GEMINI_CURSOR = null;
 
 class GeminiEffect extends CanvasEffect {
   setup() {
@@ -345,7 +356,7 @@ class GeminiEffect extends CanvasEffect {
     // running one would be (this.time += dt accumulates real seconds).
     this.time = (performance.now() - GEMINI_EPOCH) / 1000;
 
-    const persisted = GEMINI_CURSOR_BY_SIDE[this.side];
+    const persisted = GEMINI_CURSOR;
     this.cursor = persisted
       ? { x: persisted.fx * this.width, y: persisted.fy * this.height }
       : { x: this.width * 0.5, y: this.height * 0.5 };
@@ -362,7 +373,9 @@ class GeminiEffect extends CanvasEffect {
   }
 
   _buildParticles() {
-    const rng = mulberry32(this.side === "primary" ? 0x4f5bd5 : 0x8b7cff);
+    // Side-independent seed (see metaballs): a gemini field looks the same on either side,
+    // so merging into Gemini is a seamless reveal regardless of which side it started on.
+    const rng = mulberry32(0x4f5bd5);
     const count = this.merged ? this.config.countMerged : this.config.countSplit;
     const STEPS = this.palette.length;
 
@@ -484,8 +497,8 @@ class GeminiEffect extends CanvasEffect {
 
     // Persist the cursor (normalised) so a re-mount resumes from here instead of the
     // centre. Mutated in place — one allocation on the first frame, none after.
-    let store = GEMINI_CURSOR_BY_SIDE[this.side];
-    if (!store) store = GEMINI_CURSOR_BY_SIDE[this.side] = { fx: 0.5, fy: 0.5 };
+    let store = GEMINI_CURSOR;
+    if (!store) store = GEMINI_CURSOR = { fx: 0.5, fy: 0.5 };
     store.fx = this.cursor.x / Math.max(1, w);
     store.fy = this.cursor.y / Math.max(1, h);
   }
@@ -659,11 +672,12 @@ void main() {
 }
 `;
 
-// Shared so a re-mount (model swapped away and back) resumes the animation roughly
-// where it was instead of snapping back to t=0; the smoothed mouse is persisted per side
-// so the cursor glow doesn't jump to the centre on re-mount. Normalised already.
+// Shared so a re-mount (model swapped away and back, or a merge that rebuilds the side)
+// resumes the animation roughly where it was instead of snapping back to t=0; the smoothed
+// mouse persists in ONE shared slot (not per side) so the cursor glow stays continuous when
+// a merge moves the field from the secondary to the primary side. Normalised already.
 const FAULTY_EPOCH = (typeof performance !== "undefined" ? performance.now() : Date.now());
-const FAULTY_MOUSE_BY_SIDE = { primary: null, secondary: null };
+let FAULTY_MOUSE = null;
 
 class FaultyTerminalEffect extends CanvasEffect {
   static canvasContext = "custom";
@@ -681,14 +695,16 @@ class FaultyTerminalEffect extends CanvasEffect {
     const cfg = this.config;
     this.tint = hexToRgb(cfg.tint);
     this.timeScale = cfg.timeScale ?? 1;
-    // Deterministic per-side offset desyncs the two halves without Math.random (keeps
-    // dev:local reproducible); the epoch phasing makes a re-mount resume in place.
-    const offset = this.side === "primary" ? 0 : 41.7;
-    this.time = (performance.now() - FAULTY_EPOCH) / 1000 * this.timeScale + offset;
-    // Reuse the persisted object so the cursor glow resumes from its last spot and stays
-    // persisted (the draw loop mutates it in place).
-    this.smoothMouse = FAULTY_MOUSE_BY_SIDE[this.side]
-      || (FAULTY_MOUSE_BY_SIDE[this.side] = { x: 0.5, y: 0.5 });
+    // Side-INDEPENDENT phase: a codex field must look identical whether it's mounted on
+    // the primary or secondary side. A merge always keeps the primary side, so a per-side
+    // offset made a codex that started on the secondary jump (the phase shifted) when the
+    // merge moved it to primary. Two codex fields never coexist (same model both sides ⇒
+    // merged ⇒ secondary destroyed), so there's nothing to desync. Epoch phasing still
+    // makes a re-mount resume in place; dev:local stays deterministic (no Math.random).
+    this.time = (performance.now() - FAULTY_EPOCH) / 1000 * this.timeScale;
+    // One shared cursor slot (not per side) so the glow stays put across a merge: the
+    // surviving primary inherits the live position the secondary was writing.
+    this.smoothMouse = FAULTY_MOUSE || (FAULTY_MOUSE = { x: 0.5, y: 0.5 });
 
     if (!gl) {
       this._initFallback();
@@ -790,16 +806,19 @@ class FaultyTerminalEffect extends CanvasEffect {
 
   draw(dt, now, still) {
     if (!still) this.time += dt * this.timeScale;
-    if (this.gl && this.program) this._drawWebgl();
+    if (this.gl && this.program) this._drawWebgl(dt);
     else this._drawFallback(still);
   }
 
-  _drawWebgl() {
+  _drawWebgl(dt) {
     const gl = this.gl;
-    // Ease the smoothed mouse toward the pointer; the shader wants y up.
-    const damp = 0.08;
-    this.smoothMouse.x += (this.pointer.x - this.smoothMouse.x) * damp;
-    this.smoothMouse.y += ((1 - this.pointer.y) - this.smoothMouse.y) * damp;
+    // Ease the smoothed mouse toward the pointer; the shader wants y up. The chase is
+    // frame-rate-independent (`1 - e^(-rate·dt)`) so the glow keeps pace with the cursor
+    // no matter the cap — the previous fixed per-frame factor trailed far behind.
+    const rate = this.config.mouseFollowRate ?? 16;
+    const k = 1 - Math.exp(-rate * Math.max(dt, 0));
+    this.smoothMouse.x += (this.pointer.x - this.smoothMouse.x) * k;
+    this.smoothMouse.y += ((1 - this.pointer.y) - this.smoothMouse.y) * k;
 
     gl.uniform1f(this.locations.iTime, this.time);
     gl.uniform2f(this.locations.uMouse, this.smoothMouse.x, this.smoothMouse.y);
@@ -839,11 +858,12 @@ class FaultyTerminalEffect extends CanvasEffect {
 }
 
 const META_MAX_BALLS = 36;
-// Shared so the metaballs survive a re-mount (switching model away and back) without
-// resetting: the motion is phased to one wall clock, and the cursor ball position is
-// remembered per side instead of starting from the centre each time.
+// Shared so the metaballs survive a re-mount (switching model away and back, or a merge
+// that rebuilds the side) without resetting: the motion is phased to one wall clock, and
+// the cursor ball lives in ONE shared slot (not per side) so it stays put when a merge
+// moves the field from the secondary to the primary side.
 const META_EPOCH = (typeof performance !== "undefined" ? performance.now() : Date.now());
-const META_CURSOR_BY_SIDE = { primary: { x: 0, y: 0 }, secondary: { x: 0, y: 0 } };
+const META_CURSOR = { x: 0, y: 0 };
 const META_VERTEX = `
 attribute vec2 aPosition;
 
@@ -950,7 +970,7 @@ class MetaballsEffect extends CanvasEffect {
     this.cursorColor = hexToRgb(this.config.cursorBallColor);
     // Persist the cursor ball across re-mounts so it resumes rather than sliding in from
     // the centre when the effect is switched away and back.
-    this.cursorWorld = META_CURSOR_BY_SIDE[this.side] || (META_CURSOR_BY_SIDE[this.side] = { x: 0, y: 0 });
+    this.cursorWorld = META_CURSOR;
     this._setupBalls();
     // Phase the animation to a shared wall clock so a freshly mounted instance picks up
     // where a continuously-running one would be — re-mounting no longer snaps the balls
@@ -1050,7 +1070,16 @@ class MetaballsEffect extends CanvasEffect {
   }
 
   _setupBalls() {
-    const rng = mulberry32((this.side === "primary" ? 0xc97a3d : 0xebc9a6) ^ (this.merged ? 0x9e3779b9 : 0));
+    // Seed and anchors are identical whether split or merged, so a merge is a seamless
+    // mask reveal (the .fx-stage is always full-viewport — split just clips the primary
+    // to the top-left; merging drops that mask) rather than a reseed that teleports every
+    // blob. Ball i lands in the same spot in both states because the rng stream up to it
+    // is identical; merged only appends a few extra balls that fade in over the crossfade.
+    // Mirrors the gemini field, which already never reseeds on merge.
+    // Side-independent seed: a Claude field looks the same on either side, so merging into
+    // Claude is a seamless reveal no matter which side it started on (the survivor is always
+    // the primary side). Two metaballs fields never coexist, so nothing needs desyncing.
+    const rng = mulberry32(0xc97a3d);
     const requestedCount = this.merged ? this.config.ballCountMerged : this.config.ballCountSplit;
     const mobile = isMobile();
     const mobileCount = Math.max(10, Math.round(requestedCount * 0.72));
@@ -1059,18 +1088,13 @@ class MetaballsEffect extends CanvasEffect {
     // Anchors are scattered across the WHOLE field (corners, edges, centre) rather than
     // bunched near the middle, so the goo reads as "metaballs everywhere". A few balls
     // share each anchor in a tight cluster, which is what keeps each blob merged and
-    // gooey instead of looking like isolated dots — the spread/merge trade-off.
-    const anchors = this.merged
-      ? [
-        [-0.42, -0.34], [-0.02, -0.36], [0.40, -0.32],
-        [-0.44, 0.02], [0.08, 0.06], [0.44, -0.02],
-        [-0.30, 0.36], [0.14, 0.40], [0.42, 0.34]
-      ]
-      : [
-        [-0.40, -0.34], [0.02, -0.32], [0.40, -0.36],
-        [-0.42, 0.06], [0.16, 0.12],
-        [-0.18, 0.38], [0.40, 0.30]
-      ];
+    // gooey instead of looking like isolated dots — the spread/merge trade-off. One fixed
+    // set for both states keeps every blob's home stable across a merge.
+    const anchors = [
+      [-0.40, -0.34], [0.02, -0.32], [0.40, -0.36],
+      [-0.42, 0.06], [0.16, 0.12],
+      [-0.18, 0.38], [0.40, 0.30]
+    ];
     const minRadius = this.config.minBallRadius;
     const maxRadius = this.config.maxBallRadius;
     const radiusScale = mobile ? 0.82 : 1;
@@ -1313,4 +1337,36 @@ export function destroyModelEffects() {
   token += 1;
   clearSide("primary", true);
   clearSide("secondary", true);
+}
+
+// Pre-compile the WebGL programs the model screen will mount (faulty-terminal + metaballs)
+// on a throwaway 1x1 context, so the first real mount reuses the driver's cached shader
+// binary instead of paying the link cost mid-transition. Called during the boot loader so
+// the heavy work lands while the user is already watching a spinner — clicking into the
+// model screen then stays instant. Best-effort: any failure is swallowed (the real mount
+// recompiles or falls back to Canvas2D exactly as before). Runs at most once.
+let warmedUp = false;
+export function warmupModelEffects() {
+  if (warmedUp || reduceMq.matches) return;
+  warmedUp = true;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const gl = canvas.getContext("webgl", { alpha: true, antialias: false, depth: false });
+    if (!gl) return;
+    [[FAULTY_VERTEX, FAULTY_FRAGMENT], [META_VERTEX, META_FRAGMENT]].forEach(([vert, frag]) => {
+      try {
+        const program = createProgram(gl, vert, frag);
+        // Force the driver to finish the upload, then drop it — we only want the cache warm.
+        gl.useProgram(program);
+        gl.deleteProgram(program);
+      } catch {
+        /* a single shader failing to warm is harmless; the live mount handles it */
+      }
+    });
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  } catch {
+    /* no WebGL / blocked context — skip warmup entirely */
+  }
 }

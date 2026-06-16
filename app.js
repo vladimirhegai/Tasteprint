@@ -1,7 +1,7 @@
 import { applyTheme, BASE_THEME, buildTheme } from "./theme.js";
 import { ensureContrast, contrastRatio, mixHex } from "./color.js";
 import { archetypeForGroup, brandForReference, MOOD_THEMES } from "./themes.db.js";
-import { syncModelEffectsDeferred, destroyModelEffects } from "./modelEffects.js";
+import { syncModelEffectsDeferred, destroyModelEffects, warmupModelEffects } from "./modelEffects.js";
 
 const app = document.querySelector("#app");
 
@@ -50,6 +50,14 @@ function stepEyebrow() {
 // model twice merges the worlds back into one. See updateModelSplit().
 const ALLOWED_MODEL_IDS = ["codex", "claude", "gemini"];
 
+// Where to send users whose chosen CLI isn't on PATH. Surfaced by the not-detected gate
+// (showModelGate) when the interview starts with an uninstalled model selected.
+const MODEL_INSTALL = {
+  codex: { label: "Codex", url: "https://developers.openai.com/codex/cli" },
+  claude: { label: "Claude Code", url: "https://claude.com/product/claude-code" },
+  gemini: { label: "Gemini", url: "https://antigravity.google/product/antigravity-cli" }
+};
+
 // Each agent gets a full themed "world", split conceptually into COLOR + EFFECT.
 //   COLOR  — the palette half: two soft field stops (the base wash, kept low in
 //            saturation so two worlds blend rather than collide), two bloom tones
@@ -66,18 +74,18 @@ const ALLOWED_MODEL_IDS = ["codex", "claude", "gemini"];
 const MODEL_WORLDS = {
   codex: {
     bg: "#DDEDE5", field1: "#EAF4EF", field2: "#D3E8DD", bloom1: "#9FDDC4", bloom2: "#C2EAD8",
-    card: "#F3F7F4", ink: "#16271F", inkMuted: "#5A6F64", hairline: "#C5DFD4",
-    accent: "#1F9D78", glow: "rgba(31, 157, 120, 0.16)", radius: "10px", effect: "faulty-terminal"
+    card: "#FCFEFD", ink: "#13241C", inkMuted: "#475A50", hairline: "#C5DFD4",
+    accent: "#178A68", glow: "rgba(23, 138, 104, 0.18)", radius: "10px", effect: "faulty-terminal"
   },
   claude: {
     bg: "#EBDDCC", field1: "#F3EADF", field2: "#E7D7C6", bloom1: "#EBC9A6", bloom2: "#E5D2BC",
-    card: "#F8F1E8", ink: "#3A2516", inkMuted: "#74583F", hairline: "#E0CBB3",
-    accent: "#C97A3D", glow: "rgba(201, 122, 61, 0.16)", radius: "22px", effect: "metaballs"
+    card: "#FDFAF5", ink: "#36210F", inkMuted: "#5F4632", hairline: "#E0CBB3",
+    accent: "#B96A2E", glow: "rgba(185, 106, 46, 0.18)", radius: "22px", effect: "metaballs"
   },
   gemini: {
     bg: "#DEE2FB", field1: "#EAECFD", field2: "#D6DBFA", bloom1: "#BCC4FF", bloom2: "#CDBEF7",
-    card: "#F1F2FC", ink: "#1B1E3C", inkMuted: "#565C8A", hairline: "#C9CEF3",
-    accent: "#4F5BD5", glow: "rgba(79, 91, 213, 0.18)", radius: "16px", effect: "antigravity"
+    card: "#FBFBFE", ink: "#191C3A", inkMuted: "#444A78", hairline: "#C9CEF3",
+    accent: "#454FC6", glow: "rgba(69, 79, 198, 0.2)", radius: "16px", effect: "antigravity"
   }
 };
 
@@ -89,6 +97,28 @@ const NEUTRAL_WORLD = {
 
 function worldForModelId(id) {
   return MODEL_WORLDS[id] || NEUTRAL_WORLD;
+}
+
+// The model object currently bound to a card, falling back to the first available model
+// the way modelFieldsHtml() does, so the card's identity (font/skin) always resolves.
+function selectedModelFor(role) {
+  return state.models[role] || modelWithDefaults(state.availableModels[0]);
+}
+
+// The data-model key the card wears — drives its typographic + surface personality in CSS
+// ([data-model="codex"|"claude"|"gemini"]). Anything off-roster falls back to "neutral".
+function modelKeyForRole(role) {
+  const id = selectedModelFor(role)?.id;
+  return ALLOWED_MODEL_IDS.includes(id) ? id : "neutral";
+}
+
+// What the Codex card "types" in its terminal echo line: the chosen model id. Mirrors the
+// variant resolution in modelFieldsHtml() so the echo always tracks the Model id select.
+function codexEchoText(role) {
+  const selected = selectedModelFor(role);
+  const variants = (selected?.variants?.length ? selected.variants : []).filter((variant) => !variant.custom);
+  const variant = (selected?.variant && !selected.variant.custom) ? selected.variant : variants[0];
+  return variant?.id || selected?.id || "";
 }
 
 // The split CTA paints white text over a diagonal of the two worlds' accents. The
@@ -156,6 +186,7 @@ let loaderTimer = null;
 let pendingPulse = false;
 let introTimers = [];
 let introDomeCleanup = null;
+let introLeaving = false;
 let activeTheme = { ...BASE_THEME };
 
 // Name-reveal choreography. CSS animation stagger/durations must match these.
@@ -186,6 +217,11 @@ async function init() {
   applyTheme(BASE_THEME);
   state.loading = "boot";
   paint();
+  // The model screen's WebGL effects are the heaviest thing to spin up, so warm their
+  // shader programs now — while the boot loader is already on screen and during the
+  // intro the user reads next — so entering the model screen later is instant. Deferred
+  // a frame so the spinner paints first; runs in parallel with the data fetch below.
+  requestAnimationFrame(() => warmupModelEffects());
   const bootStart = Date.now();
 
   try {
@@ -202,8 +238,10 @@ async function init() {
 
     const allowed = state.availableModels.filter((model) => ALLOWED_MODEL_IDS.includes(model.id));
     const pool = allowed.length ? allowed : state.availableModels;
-    state.models.primary = modelWithDefaults(pool[0]);
-    state.models.secondary = modelWithDefaults(pool[1] || pool[0]);
+    // Opinionated starting pair: Claude Opus on High leads, Codex gpt-5.4 on Medium
+    // challenges. Falls back to the first/second pool entries if those aren't present.
+    state.models.primary = pickDefaultModel(pool, "claude", "opus", "high") || modelWithDefaults(pool[0]);
+    state.models.secondary = pickDefaultModel(pool, "codex", "gpt-5.4", "medium") || modelWithDefaults(pool[1] || pool[0]);
     state.loading = "";
     state.step = state.introSeen ? "models" : "intro";
   } catch (error) {
@@ -477,6 +515,22 @@ function updateModelSplit() {
     secondary: secondary.effect,
     merged
   });
+
+  // Card identity: each surviving card element wears its model's key (font + skin) and, for
+  // Codex, the live model id it "prints". The card DOM persists across a model swap (only the
+  // selects re-render), so this keeps the skin + echo current without rebuilding the card —
+  // the replay of the typewriter animation is fired separately by refreshModelCard().
+  ["primary", "secondary"].forEach((role) => {
+    const card = document.querySelector(`.panel.model-card.${role}`);
+    if (!card) return;
+    card.dataset.model = modelKeyForRole(role);
+    const echo = card.querySelector(".echo-text");
+    if (echo) {
+      const text = codexEchoText(role);
+      echo.textContent = text;
+      echo.style.setProperty("--len", String(Math.max(text.length, 1)));
+    }
+  });
 }
 
 // One atmosphere's layer stack, bottom → top: a slow CSS flowing-gradient base, two
@@ -550,6 +604,7 @@ function mountIntro() {
   `;
 
   clearIntroTimers();
+  introLeaving = false;
 
   const intro = app.querySelector(".intro");
   const dome = app.querySelector("#introDome");
@@ -943,14 +998,33 @@ function advanceFromIntro() {
     return;
   }
   clearIntroTimers();
+  introLeaving = false;
   state.introSeen = true;
-  go("models");
+  state.step = "models";
+  // Mount the model screen, but never leave the user stranded on the faded-out intro if
+  // it throws mid-paint (the rare "clicked Start, nothing appeared" hang). One clean
+  // retry from a fresh shell recovers the transient; a second failure surfaces an error
+  // instead of a blank screen.
+  try {
+    paint({ transition: true });
+  } catch (error) {
+    console.error("Model screen failed to mount; retrying:", error);
+    shellMounted = false;
+    try {
+      paint({ transition: false });
+    } catch (retryError) {
+      console.error("Model screen retry failed:", retryError);
+      state.error = retryError?.message || "Something went wrong loading the model screen.";
+    }
+  }
 }
 
 // Click-out: fly the letters out and fade the CTA / dome gallery / anatomy together,
 // then hand off to models once the exit completes. Reduced motion skips straight across.
 function exitIntro() {
-  if (state.step !== "intro") {
+  // Ignore repeat clicks once the exit is already running, so a second click can't clear
+  // and reschedule the pending advance (which would stall the hand-off).
+  if (state.step !== "intro" || introLeaving) {
     return;
   }
   const intro = app.querySelector(".intro");
@@ -958,6 +1032,7 @@ function exitIntro() {
   if (prefersReducedMotion() || !intro || !stage) {
     return advanceFromIntro();
   }
+  introLeaving = true;
   clearIntroTimers();
   intro.classList.add("is-leaving");
   stage.classList.add("is-exiting");
@@ -1051,14 +1126,20 @@ function renderModels() {
 
 function renderModelSelector(role) {
   const copy = MODEL_ROLE_COPY[role] || MODEL_ROLE_COPY.primary;
+  // data-model gives the card its personality (terminal / editorial / glass); the echo line
+  // is the Codex terminal readout (hidden by CSS for the other two). Both stay in sync via
+  // updateModelSplit() on every paint and model swap.
+  const key = modelKeyForRole(role);
+  const echo = codexEchoText(role);
   return `
-    <div class="panel model-card ${role}">
+    <div class="panel model-card ${role}" data-model="${esc(key)}">
       <div class="model-head">
         <div class="model-role"><span class="role-dot"></span><span class="role-name">${esc(copy.name)}</span></div>
         <span class="role-caption">${esc(copy.caption)}</span>
       </div>
       <p class="model-purpose">${esc(copy.purpose)}</p>
       ${modelFieldsHtml(role)}
+      <div class="model-echo" aria-hidden="true"><span class="echo-prompt">&#10095;</span><span class="echo-text" style="--len:${Math.max(echo.length, 1)}">${esc(echo)}</span><span class="echo-caret"></span></div>
     </div>
   `;
 }
@@ -1107,15 +1188,29 @@ function modelFieldsHtml(role) {
 // and fires the acknowledgement pulse — all while the card + wrap DOM stay put, so the
 // idle float keeps running and the surface eases instead of snapping.
 function refreshModelCard(role) {
-  const fields = document.querySelector(`.panel.model-card.${role} .model-fields`);
+  const cardSel = `.panel.model-card.${role}`;
+  const fields = document.querySelector(`${cardSel} .model-fields`);
   if (!fields) {
     return refresh();
   }
+  // Snapshot the Codex echo before the swap: it prints the model id, so we only re-type when
+  // that id actually changes. Switching thinking mode leaves the id untouched — no reset.
+  const prevEcho = document.querySelector(`${cardSel} .echo-text`)?.textContent ?? null;
   fields.outerHTML = modelFieldsHtml(role);
   updateModelSplit();
   syncSelectValues();
-  const card = document.querySelector(`.panel.model-card.${role}`);
+  const card = document.querySelector(cardSel);
   if (card && !prefersReducedMotion()) {
+    // Codex acks the change by re-typing its echo line — but only when the model id changed.
+    // The others get the accent ring pulse on any change.
+    if (card.dataset.model === "codex") {
+      const echo = card.querySelector(".echo-text");
+      if (echo && echo.textContent !== prevEcho) {
+        echo.classList.remove("is-typing");
+        void echo.offsetWidth;
+        echo.classList.add("is-typing");
+      }
+    }
     card.classList.remove("is-acked");
     void card.offsetWidth;
     card.classList.add("is-acked");
@@ -1674,6 +1769,28 @@ function modelWithDefaults(model) {
   return clone;
 }
 
+// Build a fully-resolved selection for a specific model id, pinning a preferred variant
+// and thinking level when they exist (used to seed the opinionated starting pair).
+// Returns null if the model isn't in the pool so the caller can fall back.
+function pickDefaultModel(pool, modelId, variantId, thinkingId) {
+  const base = pool.find((model) => model.id === modelId);
+  if (!base) {
+    return null;
+  }
+  const model = modelWithDefaults(base);
+  const variant = model.variants?.find((item) => item.id === variantId);
+  if (variant) {
+    model.variant = variant;
+    model.thinking = defaultThinkingFor(model, variant);
+  }
+  const options = model.variant?.thinkingOptions?.length ? model.variant.thinkingOptions : model.thinkingOptions || [];
+  const thinking = options.find((item) => item.id === thinkingId);
+  if (thinking) {
+    model.thinking = thinking;
+  }
+  return model;
+}
+
 function defaultThinkingFor(model, variant) {
   const options = variant?.thinkingOptions?.length ? variant.thinkingOptions : model?.thinkingOptions || [];
   return options.find((option) => option.id === variant?.defaultThinkingId)
@@ -1702,6 +1819,128 @@ function syncSelectValues() {
   document.querySelectorAll("[data-bind-model-thinking]").forEach((element) => {
     element.value = state.models[element.dataset.bindModelThinking]?.thinking?.id || "";
   });
+}
+
+/* ---------------- Not-detected gate ---------------- */
+
+// The unique showcased models in the current pair whose CLI isn't on PATH. The local
+// fallback and any installed CLI report installed:true, so they never gate.
+function uninstalledSelections() {
+  const seen = new Set();
+  const missing = [];
+  for (const role of ["primary", "secondary"]) {
+    const model = state.models[role];
+    if (!model || !ALLOWED_MODEL_IDS.includes(model.id) || model.installed || seen.has(model.id)) {
+      continue;
+    }
+    seen.add(model.id);
+    missing.push(model);
+  }
+  return missing;
+}
+
+let modelGateEl = null;
+let modelGateKeydown = null;
+
+function showModelGate(missing) {
+  dismissModelGate();
+  const names = missing.map((model) => MODEL_INSTALL[model.id]?.label || model.label);
+  const multiple = names.length > 1;
+  const title = multiple ? "Those models aren't installed yet" : `${names[0]} isn't installed yet`;
+  const lead = `${joinNames(names)} ${multiple ? "weren't" : "wasn't"} detected on your PATH. Tasteprint runs the design through the real CLI, so it needs the tool installed locally.`;
+  const installs = missing.map((model) => {
+    const info = MODEL_INSTALL[model.id] || { label: model.label, url: "#" };
+    return `
+      <a class="gate-install" href="${esc(info.url)}" target="_blank" rel="noreferrer noopener">
+        <span class="gate-install-text">
+          <span class="gate-install-name">${esc(info.label)}</span>
+          <span class="gate-install-url">${esc(prettyUrl(info.url))}</span>
+        </span>
+        <span class="gate-install-arrow" aria-hidden="true">↗</span>
+      </a>`;
+  }).join("");
+
+  const overlay = document.createElement("div");
+  overlay.className = "model-gate";
+  overlay.innerHTML = `
+    <div class="model-gate-backdrop" data-gate-dismiss></div>
+    <div class="model-gate-card" role="dialog" aria-modal="true" aria-labelledby="gateTitle" aria-describedby="gateLead">
+      <span class="gate-emblem" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4.5" width="18" height="15" rx="2.5"></rect>
+          <path d="M7.5 9.5l3 2.5-3 2.5"></path>
+          <path d="M12.5 15h4"></path>
+        </svg>
+      </span>
+      <h2 class="gate-title" id="gateTitle">${esc(title)}</h2>
+      <p class="gate-lead" id="gateLead">${esc(lead)}</p>
+      <div class="gate-installs">
+        <p class="gate-installs-label">Have a subscription? Install the CLI</p>
+        ${installs}
+      </div>
+      <div class="gate-actions">
+        <button class="button ghost" data-gate-continue>Start anyway</button>
+        <button class="button primary" data-gate-dismiss>Got it</button>
+      </div>
+    </div>
+  `;
+
+  overlay.addEventListener("click", (event) => {
+    if (event.target.closest("[data-gate-dismiss]")) {
+      event.preventDefault();
+      dismissModelGate();
+    } else if (event.target.closest("[data-gate-continue]")) {
+      event.preventDefault();
+      dismissModelGate();
+      go("intake");
+    }
+  });
+
+  modelGateKeydown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissModelGate();
+    }
+  };
+  document.addEventListener("keydown", modelGateKeydown);
+
+  app.appendChild(overlay);
+  modelGateEl = overlay;
+  requestAnimationFrame(() => overlay.classList.add("is-open"));
+  overlay.querySelector("[data-gate-dismiss].primary")?.focus();
+}
+
+function dismissModelGate() {
+  if (modelGateKeydown) {
+    document.removeEventListener("keydown", modelGateKeydown);
+    modelGateKeydown = null;
+  }
+  const overlay = modelGateEl;
+  if (!overlay) {
+    return;
+  }
+  modelGateEl = null;
+  overlay.classList.remove("is-open");
+  if (prefersReducedMotion()) {
+    overlay.remove();
+    return;
+  }
+  overlay.addEventListener("transitionend", () => overlay.remove(), { once: true });
+  setTimeout(() => overlay.remove(), 400);
+}
+
+function joinNames(names) {
+  if (names.length <= 1) {
+    return names[0] || "";
+  }
+  if (names.length === 2) {
+    return `${names[0]} and ${names[1]}`;
+  }
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+function prettyUrl(url) {
+  return String(url).replace(/^https?:\/\//, "").replace(/\/+$/, "");
 }
 
 /* ---------------- Events (delegated, bound once) ---------------- */
@@ -1820,8 +2059,16 @@ async function handleAction(action, value) {
           return;
         }
         return exitIntro();
-      case "start-intake":
+      case "start-intake": {
+        // PATH is only checked here, not on the model screen — every model stays
+        // selectable so its world can be previewed. If the chosen CLI(s) aren't
+        // installed, surface the install gate instead of starting.
+        const missing = uninstalledSelections();
+        if (missing.length) {
+          return showModelGate(missing);
+        }
         return go("intake");
+      }
       case "back-models":
         return go("models");
       case "back-intake":
