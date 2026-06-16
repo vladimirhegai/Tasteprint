@@ -616,7 +616,7 @@ function introAnatomyHtml() {
       <div class="bp bp-accent" style="--n:4">
         <span class="bp-dot"></span>
         <span class="bp-leader"></span>
-        <span class="bp-tag"><i class="bp-sw" style="--c:var(--primary)"></i>Accent / primary</span>
+        <span class="bp-tag"><i class="bp-sw" style="--c:var(--warm-charcoal)"></i>Accent / charcoal</span>
       </div>
       <div class="bp bp-action" style="--n:5">
         <span class="bp-bracket"></span>
