@@ -13,6 +13,7 @@ yarn-error.log*
 Thumbs.db
 
 # User-specified ignored files
+/*.md
 *DESIGN-copy*
 *SKILL-copy*
 DESIGN.md
