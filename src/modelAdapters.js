@@ -32,7 +32,7 @@ const CLAUDE_THINKING_OPTIONS = [
 const CANDIDATES = [
   {
     id: "codex",
-    label: "Codex CLI",
+    label: "Codex",
     executable: "codex",
     role: "Agentic coding CLI",
     defaultContextWindow: 272000,
@@ -75,7 +75,7 @@ const CANDIDATES = [
   },
   {
     id: "gemini",
-    label: "Gemini CLI",
+    label: "Gemini",
     executable: "gemini",
     role: "Agentic coding CLI",
     defaultContextWindow: 1000000,

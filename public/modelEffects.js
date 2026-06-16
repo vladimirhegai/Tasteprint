@@ -90,7 +90,10 @@ const CONFIG_BY_TYPE = Object.fromEntries(
 
 const reduceMq = window.matchMedia("(prefers-reduced-motion: reduce)");
 const MOBILE_MAX = 860;
-const CROSSFADE_MS = 360;
+// Must match the .fx-instance opacity transition in styles.css (600ms). Retiring the
+// outgoing effect sooner than its fade-out completes pops it off mid-crossfade, so the
+// model swap reads as a cut instead of a blend.
+const CROSSFADE_MS = 600;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -449,17 +452,25 @@ class GeminiEffect extends CanvasEffect {
       if (drew) ctx.fill();
     }
 
-    // Pass 2 — particles caught in the cursor ring. Few of them, so colour is quantised to
-    // the ramp and alpha rides globalAlpha; this stays allocation-free too.
+    // Pass 2 — particles caught in the cursor field. Each eases from its ambient home
+    // toward the orbiting ring as it's pulled in (smoothstep of `pull`) instead of
+    // snapping onto the ring the instant it crosses the boundary — so capsules visibly
+    // *flow* into the field. At pull≈0 the blended position/size/colour/alpha all equal
+    // the ambient draw, so the field edge stays seamless. Still allocation-free.
     const lastStep = this.palette.length - 1;
     for (let i = 0; i < activeCount; i += 1) {
       const p = this.active[i];
       const pull = 1 - p._dist / fieldRadius;
+      const join = pull * pull * (3 - 2 * pull);
+      const homeX = cx + p._dx;
+      const homeY = cy + p._dy;
       const angle = Math.atan2(p._dy, p._dx) + t * 0.18;
       const rx = ringRadius + Math.sin(t * p.speed + p.phase) * drift;
       const ry = ringRadius + Math.cos(t * p.speed + p.phase) * drift;
-      const x = cx + Math.cos(angle) * rx;
-      const y = cy + Math.sin(angle) * ry;
+      const ringX = cx + Math.cos(angle) * rx;
+      const ringY = cy + Math.sin(angle) * ry;
+      const x = homeX + (ringX - homeX) * join;
+      const y = homeY + (ringY - homeY) * join;
       const r = Math.max(0.8, p.size * sizeScale * (1 + pull * 0.8));
       const ci = clamp(Math.round((p.tone + pull * 0.35) * lastStep), 0, lastStep);
       ctx.globalAlpha = this.baseAlpha + pull * 0.5;

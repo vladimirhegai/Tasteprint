@@ -1025,8 +1025,8 @@ function flashLimit(screen, footer) {
 // Role copy lives here so each card reads like an editorial "role object" — a
 // purpose caption next to the marker, then a one-line explanation of the job.
 const MODEL_ROLE_COPY = {
-  primary: { name: "Primary", caption: "Drives synthesis", purpose: "The lead model. It reads everything and writes your DESIGN.md." },
-  secondary: { name: "Secondary", caption: "Asks you the questions", purpose: "Optional. A second voice for critique, comparison, or interview." }
+  primary: { name: "Primary", caption: "Leads the design", purpose: "The lead model. It reads everything and writes your DESIGN.md." },
+  secondary: { name: "Secondary", caption: "Asks you the questions", purpose: "A second voice for critique, comparison, or interview." }
 };
 
 function renderModels() {
@@ -1036,7 +1036,7 @@ function renderModels() {
     eyebrow: stepEyebrow(),
     titleHtml: splitText("Choose your model pair."),
     title: "Choose your model pair.",
-    helper: "Pick a primary model for synthesis and an optional secondary for challenge, comparison, or the interview.",
+    helper: "Pick a primary model to lead the design and a secondary for challenge, comparison, or the interview.",
     bodyClass: "model-body",
     body: `
       ${state.error ? errorHtml(state.error) : ""}
@@ -1600,17 +1600,14 @@ function swatchRow(direction) {
   return `<div class="swatch-row">${swatches}</div>`;
 }
 
-// Renders text that is sliced along a diagonal seam: the left wedge takes --sl,
-// the right wedge takes --sr. Off the model screen those vars are unset, so both
-// wedges fall back to currentColor and it reads as ordinary text. When the two
-// chosen models match, --sl === --sr and the seam disappears.
+// Renders text filled with a left→right gradient between the two chosen worlds'
+// colours (--sl → --sr, set only on the model screen via background-clip:text). Off
+// the model screen those vars are unset, so the gradient collapses to currentColor and
+// it reads as ordinary text. When the two chosen models match, --sl === --sr and the
+// gradient becomes a single flat colour. The big title (.title) overrides the stops
+// with the deepened brand accents so its blend reads boldly; see styles.css.
 function splitText(text) {
-  const safe = esc(text);
-  return `<span class="split-text"
-    ><span class="split-base">${safe}</span
-    ><span class="split-layer left" aria-hidden="true">${safe}</span
-    ><span class="split-layer right" aria-hidden="true">${safe}</span
-  ></span>`;
+  return `<span class="split-text"><span class="split-base">${esc(text)}</span></span>`;
 }
 
 function choiceCard({ label, description, selected, action, value, extraClass = "", htmlDescription = false }) {

@@ -548,6 +548,11 @@ button {
   position: absolute;
   inset: 0;
   overflow: hidden;
+  /* Crossfade the base field colour on a model swap so the world eases over rather than
+     popping — paired with the 600ms card + canvas-effect crossfades. Only the base field
+     transitions (one-shot, on an explicit dropdown change); the blurred blooms snap, which
+     is imperceptible under their 44px blur and keeps the heavy layers off the paint path. */
+  transition: background 600ms var(--ease);
 }
 
 /* Local aliases so blob + texture rules can stay side-agnostic. */
@@ -1002,17 +1007,17 @@ button {
   background: var(--card-accent, var(--primary));
 }
 
-/* Model CTA: a single confident pill in the primary world's (deepened) accent — the
-   instrument you chose. No decorative slash. On hover the secondary world's warm
-   accent slides in as a quiet right-edge glow; when both models match it has no
-   second voice to show, so the glow simply doesn't appear. */
+/* Model CTA: a confident pill filled with the same primary→secondary blend as the
+   title — the two instruments you chose, left to right. When both models match the two
+   stops are equal and it becomes one flat colour. On hover a soft sheen lifts across it
+   for feedback; the gradient itself crossfades on a model swap. */
 .button.primary.model-cta {
   position: relative;
   overflow: hidden;
   color: #ffffff;
-  background: var(--p-cta);
-  box-shadow: 0 12px 30px color-mix(in srgb, var(--p-cta) 26%, transparent);
-  transition: background 480ms var(--ease), box-shadow 240ms var(--ease), transform 120ms var(--ease);
+  background-image: linear-gradient(100deg, var(--p-cta) 6%, var(--s-cta) 94%);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--p-cta) 18%, var(--s-cta) 12%);
+  transition: background-image 480ms var(--ease), box-shadow 240ms var(--ease), transform 120ms var(--ease);
 }
 
 .button.primary.model-cta::after {
@@ -1020,18 +1025,18 @@ button {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: radial-gradient(120% 170% at 100% 50%, color-mix(in srgb, var(--s-accent) 78%, transparent), transparent 58%);
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 60%);
   opacity: 0;
   transition: opacity 320ms var(--ease);
   pointer-events: none;
 }
 
 .button.primary.model-cta:hover {
-  box-shadow: 0 14px 36px color-mix(in srgb, var(--p-cta) 32%, transparent);
+  box-shadow: 0 14px 36px color-mix(in srgb, var(--p-cta) 24%, var(--s-cta) 16%);
 }
 
 .button.primary.model-cta:hover::after {
-  opacity: 0.55;
+  opacity: 1;
 }
 
 .button.primary.model-cta .btn-label {
@@ -1064,39 +1069,36 @@ button {
   right: 0;
 }
 
-/* ---------- Diagonal split text ---------- */
+/* ---------- Gradient split text ----------
+   The text is filled with a left→right gradient between the two worlds' colours via
+   background-clip:text. Off the model screen --sl/--sr are unset, so the gradient
+   collapses to currentColor and the text reads normally. When both models match the two
+   stops are equal and the fill is one flat colour. The gradient itself crossfades on a
+   model swap (transition on background-image). */
 .split-text {
-  position: relative;
   display: inline-block;
   white-space: pre;
-  /* The clipped layers below are inset to this box. Without vertical padding the
-     box is only line-height tall, so glyph ascenders/descenders fall outside the
-     clip region and the title looks cropped. The padding gives the clip room. */
+  /* background-clip:text clips the fill to the line box; without vertical padding the
+     glyph ascenders/descenders fall outside it and the title looks cropped. */
   padding: 0.14em 0 0.26em;
-  --seam-top: 56%;
-  --seam-bottom: 44%;
 }
 
 .split-base {
-  color: transparent;
+  /* `color` is left as the inherited text colour so the currentColor fallback (off the
+     model screen, where --sl/--sr are unset) resolves to the real ink — only the glyph
+     fill is made transparent so the gradient shows through where it is set. */
+  background-image: linear-gradient(100deg, var(--sl, currentColor) 8%, var(--sr, currentColor) 92%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  transition: background-image 600ms var(--ease);
 }
 
-.split-layer {
-  position: absolute;
-  inset: 0;
-  white-space: pre;
-  pointer-events: none;
-  transition: color 500ms var(--ease);
-}
-
-.split-layer.left {
-  color: var(--sl, currentColor);
-  clip-path: polygon(0 0, var(--seam-top) 0, var(--seam-bottom) 100%, 0 100%);
-}
-
-.split-layer.right {
-  color: var(--sr, currentColor);
-  clip-path: polygon(var(--seam-top) 0, 100% 0, 100% 100%, var(--seam-bottom) 100%);
+/* The hero title leans on the deepened brand accents (the same colours that carry the
+   CTA), so the primary→secondary blend is clearly visible rather than a near-black
+   ink-to-ink shift. */
+.title .split-base {
+  background-image: linear-gradient(100deg, var(--p-cta, currentColor) 6%, var(--s-cta, currentColor) 94%);
 }
 
 .panel {
