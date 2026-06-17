@@ -1,7 +1,9 @@
 import { applyTheme, BASE_THEME, buildTheme } from "./theme.js";
 import { ensureContrast, contrastRatio, mixHex } from "./color.js";
 import { archetypeForGroup, brandForReference, MOOD_THEMES } from "./themes.db.js";
+import { composePreview } from "./personalityPreview.db.js";
 import { syncModelEffectsDeferred, destroyModelEffects, warmupModelEffects } from "./modelEffects.js";
+import { mountIntakeWords, updateIntakeWords, destroyIntakeWords } from "./intakeWords.js";
 
 const app = document.querySelector("#app");
 
@@ -10,12 +12,9 @@ const STEP_ORDER = [
   "intake",
   "followups",
   "personality",
-  "anti",
   "references",
   "referenceTaste",
-  "extra",
   "directions",
-  "optional",
   "preview",
   "final"
 ];
@@ -25,12 +24,9 @@ const STEP_GROUP = {
   intake: "Context",
   followups: "Context",
   personality: "Taste",
-  anti: "Taste",
   references: "References",
   referenceTaste: "References",
-  extra: "References",
   directions: "Direction",
-  optional: "Direction",
   preview: "Direction",
   final: "Files"
 };
@@ -136,10 +132,8 @@ function ctaAccentFor(accent) {
 const LOADER_PHRASES = {
   followups: ["Reading your project.", "Finding the gaps worth asking about."],
   personality: ["Reading your project.", "Tuning the taste options."],
-  anti: ["Listening for the wrong notes.", "Setting the guardrails."],
   referenceTaste: ["Reading the references.", "Noting what's worth keeping."],
   directions: ["Reading your taste.", "Weighing the references.", "Composing three directions."],
-  optional: ["Preparing the final tuning."],
   preview: ["Laying out your direction.", "Drafting the plan."],
   final: ["Writing DESIGN.md.", "Writing SKILL.md.", "Checking contrast and format."]
 };
@@ -154,23 +148,19 @@ const state = {
   referenceSearch: "",
   models: {},
   intake: "",
+  intakeFiles: [],
   intakeAnswers: {},
   followupQuestions: [],
   personalityOptions: null,
   personality: [],
-  antiOptions: null,
-  avoid: [],
   references: [],
   referenceLikeOptions: null,
   referenceLikes: {},
-  extra: "",
   directions: null,
   selectedDirections: [],
   directionComments: {},
   regenerationHistory: [],
   lockedDirection: null,
-  optionalOptions: null,
-  optionalAdditions: [],
   plan: null,
   generated: null,
   primaryContext: "",
@@ -260,6 +250,9 @@ async function init() {
 
 function paint({ transition = false } = {}) {
   stopLoader();
+  // Tear the intake word cloud down on every repaint; mountStep re-mounts it when the
+  // intake screen is the one being drawn. Cheap no-op when it isn't mounted.
+  destroyIntakeWords();
 
   if (state.loading === "boot") {
     shellMounted = false;
@@ -328,6 +321,24 @@ function mountStep({ transition = false } = {}) {
 
   updateModelSplit();
 
+  // The intake screen carries the floating word cloud; mount it now that its DOM
+  // (textbox + layer) exists. paint() already cleared any previous instance.
+  if (state.step === "intake") {
+    setupIntakeStage();
+  }
+
+  // The brief assembler writes in newly-answered rows once they mount (a single/multi
+  // pick re-renders the screen; setupBrief animates only the line that changed).
+  if (state.step === "followups") {
+    setupBrief();
+  }
+
+  // The personality template reflects the current selection the moment it mounts
+  // (so a back-nav re-applies the chosen moods), then morphs on each toggle.
+  if (state.step === "personality") {
+    applyPreviewVars();
+  }
+
   if (transition) {
     // Reset any in-flight enter animation, then force a reflow so re-adding the
     // class restarts it (otherwise a same-node re-render won't replay the motion).
@@ -368,12 +379,9 @@ function renderStep() {
     intake: renderIntake,
     followups: renderFollowups,
     personality: renderPersonality,
-    anti: renderAnti,
     references: renderReferences,
     referenceTaste: renderReferenceTaste,
-    extra: renderExtra,
     directions: renderDirections,
-    optional: renderOptional,
     preview: renderPreview,
     final: renderFinal
   }[state.step] || renderModels;
@@ -392,18 +400,93 @@ function refresh() {
 
 /* ---------------- Theme orchestration ---------------- */
 
+// The followups ("A few missing details.") screen is a full cyanotype blueprint — a
+// drafting surface on which the project brief is assembled. Deep navy ground, cyan
+// grid + contour lines, near-white technical ink, an amber redline accent for the
+// approval stamp. Routed through the same theme engine as every other screen so the
+// calm crossfade and dev:local determinism still hold. Sharp 3–4px radii read as a
+// technical drawing, not a soft card. See the scoped CSS in styles.css.
+const BLUEPRINT_THEME = {
+  canvas: "#0B2746",
+  canvasPure: "#0F3158",
+  canvasWarm: "#0D2C50",
+  ink: "#EAF3FF",
+  inkSoft: "#C6DCF5",
+  inkMuted: "#8FB2D7",
+  inkSubtle: "#5E83AC",
+  hairline: "#2E5C8C",
+  hairlineStrong: "#477FB6",
+  primary: "#5EC2FF",
+  primaryHover: "#88D3FF",
+  primarySoft: "#143A5E",
+  primaryInk: "#062239",
+  radiusCard: "4px",
+  radiusControl: "3px",
+  dark: true,
+  mood: "neutral"
+};
+
 function applyThemeForStep() {
   const theme = themeForStep(state.step);
   activeTheme = buildTheme(theme);
   applyTheme(theme);
+  syncBlueprint();
+}
+
+// The followups screen runs its own blueprint chrome: a scoped data-screen flag (so
+// the CSS theme attaches) and a fixed drafting-surface layer behind the shell. Mirrors
+// the model atmosphere lifecycle. Every other step tears the layer down; data-screen is
+// owned by updateModelSplit (models) / cleared by clearModelSplit, so we only ever set
+// the followups flag here and let those clear it on the way out.
+let blueprintBg = null;
+
+function syncBlueprint() {
+  if (state.step === "followups") {
+    document.documentElement.dataset.screen = "followups";
+    mountBlueprintBg();
+  } else {
+    clearBlueprintBg();
+  }
+}
+
+function mountBlueprintBg() {
+  if (blueprintBg) return;
+  blueprintBg = document.createElement("div");
+  blueprintBg.className = "blueprint-bg";
+  blueprintBg.setAttribute("aria-hidden", "true");
+  // Bottom → top: a grid field, drifting topographic contours, an edge vignette that
+  // keeps the centre legible, four corner registration crosshairs, and two drafting
+  // flourishes (a scale bar + a north mark). All colour rides the theme tokens.
+  blueprintBg.innerHTML = `
+    <div class="bp-layer bp-grid"></div>
+    <div class="bp-layer bp-contours"></div>
+    <div class="bp-layer bp-vignette"></div>
+    <span class="bp-cross bp-cross-tl"></span>
+    <span class="bp-cross bp-cross-tr"></span>
+    <span class="bp-cross bp-cross-bl"></span>
+    <span class="bp-cross bp-cross-br"></span>
+    <div class="bp-scale" aria-hidden="true">
+      <span class="bp-scale-bar"><i></i><i></i><i></i><i></i></span>
+      <span class="bp-scale-label">0 — SCALE 1:1 — INTAKE</span>
+    </div>
+    <div class="bp-compass" aria-hidden="true"><span class="bp-compass-needle"></span><span class="bp-compass-n">N</span></div>`;
+  app.prepend(blueprintBg);
+  requestAnimationFrame(() => blueprintBg?.classList.add("is-on"));
+}
+
+function clearBlueprintBg() {
+  if (blueprintBg) {
+    blueprintBg.remove();
+    blueprintBg = null;
+  }
 }
 
 function themeForStep(step) {
   switch (step) {
+    case "followups":
+      return buildTheme(BLUEPRINT_THEME);
     case "personality":
       return buildTheme(MOOD_THEMES.positive);
-    case "anti":
-      return buildTheme(MOOD_THEMES.negative);
     case "references":
     case "referenceTaste":
       return referencesTheme();
@@ -411,7 +494,6 @@ function themeForStep(step) {
       return state.lockedDirection
         ? buildTheme({ colors: state.lockedDirection.colors, dark: state.lockedDirection.dark })
         : buildTheme(BASE_THEME);
-    case "optional":
     case "preview":
     case "final":
       // Hold the chosen direction's palette from selection through the reveal —
@@ -618,8 +700,19 @@ function mountIntro() {
   // listeners ride along with the discarded nodes; no manual cleanup needed.
   const cta = app.querySelector(".intro-cta");
   const anatomy = app.querySelector(".intro-anatomy");
+  // The CTA flies in after a delay (intro-cta-in). Until it has fully arrived it must not
+  // be interactive — otherwise hovering its eventual location (or tabbing to it) reveals
+  // the anatomy while the button is still invisible. is-ready gates pointer-events (CSS)
+  // and the reveal handlers; it lands immediately in reduced/static mode.
+  if (cta) {
+    if (reduce) {
+      cta.classList.add("is-ready");
+    } else {
+      introTimers.push(setTimeout(() => cta.classList.add("is-ready"), INTRO_CTA_DELAY + 460));
+    }
+  }
   if (cta && anatomy) {
-    const reveal = () => anatomy.classList.add("is-revealed");
+    const reveal = () => { if (cta.classList.contains("is-ready")) anatomy.classList.add("is-revealed"); };
     const hide = () => anatomy.classList.remove("is-revealed");
     cta.addEventListener("pointerenter", reveal);
     cta.addEventListener("pointerleave", hide);
@@ -1133,6 +1226,7 @@ function renderModelSelector(role) {
   const echo = codexEchoText(role);
   return `
     <div class="panel model-card ${role}" data-model="${esc(key)}">
+      <span class="card-glass" aria-hidden="true"></span>
       <div class="model-head">
         <div class="model-role"><span class="role-dot"></span><span class="role-name">${esc(copy.name)}</span></div>
         <span class="role-caption">${esc(copy.caption)}</span>
@@ -1219,15 +1313,28 @@ function refreshModelCard(role) {
 }
 
 function renderIntake() {
+  // One quiet question, one centered box. The guidance lives in the placeholder, and
+  // the page's quirk — words from the text popping in to float around the box — is
+  // wired up by setupIntakeStage() once this renders. See intakeWords.js.
   return {
-    eyebrow: "Project intake",
+    centered: true,
+    wide: true,
     title: "What are you building?",
-    helper: "Paste the messy version — product, audience, vibe, competitors. Structure comes later.",
+    bodyClass: "intake-body",
     body: `
       ${messageHtml()}
-      <div class="field">
-        <label class="label" for="intake">Product context</label>
-        <textarea id="intake" class="textarea" data-bind="intake" placeholder="A design review tool for founders who want fast, premium landing page feedback before launch...">${esc(state.intake)}</textarea>
+      <div class="intake-stage" id="intakeStage">
+        <div class="word-cloud" id="wordCloud" aria-hidden="true"></div>
+        <div class="intake-composer">
+          <div class="intake-box">
+            <textarea id="intake" class="intake-input" data-bind="intake" rows="6" spellcheck="false" placeholder="Paste the messy version — product, audience, vibe, competitors. Structure comes later.">${esc(state.intake)}</textarea>
+            <button type="button" class="intake-add" data-action="intake-add" aria-label="Add files or media">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            </button>
+            <input type="file" id="intakeFileInput" multiple hidden />
+          </div>
+          <div class="intake-files" id="intakeFileChips"></div>
+        </div>
       </div>
     `,
     footer: footerHtml({
@@ -1239,17 +1346,58 @@ function renderIntake() {
   };
 }
 
+// Mount the floating word cloud over the freshly-rendered intake screen and restore
+// any file chips. Seeds the cloud from current text so returning to the step (or a
+// pre-filled draft) shows the words immediately.
+function setupIntakeStage() {
+  const stage = document.getElementById("intakeStage");
+  const layer = document.getElementById("wordCloud");
+  const composer = stage?.querySelector(".intake-composer");
+  if (!stage || !layer || !composer) return;
+  mountIntakeWords({ stage, layer, box: composer });
+  renderIntakeFileChips();
+  updateIntakeWords(state.intake);
+}
+
+function renderIntakeFileChips() {
+  const host = document.getElementById("intakeFileChips");
+  if (!host) return;
+  host.innerHTML = (state.intakeFiles || []).map((file) => `
+    <span class="intake-file">
+      <span class="intake-file-name">${esc(file.name)}</span>
+      <button type="button" class="intake-file-remove" data-action="remove-intake-file" data-value="${esc(file.name)}" aria-label="Remove ${esc(file.name)}">×</button>
+    </span>`).join("");
+}
+
 function renderFollowups() {
   if (state.loading) {
     return loadingDescriptor("Project intake", "followups");
   }
 
   const questions = state.followupQuestions || [];
+  if (!questions.length) {
+    return {
+      eyebrow: "Project intake",
+      title: "Your context is clear.",
+      helper: "Tasteprint has enough to move into taste.",
+      body: messageHtml(),
+      footer: footerHtml({ backAction: "back-intake", primaryLabel: "Continue", primaryAction: "finish-followups" })
+    };
+  }
+
   return {
+    wide: true,
     eyebrow: "Project intake",
-    title: questions.length ? "A few missing details." : "Your context is clear.",
-    helper: questions.length ? "Answer only what matters." : "Tasteprint has enough to move into taste.",
-    body: `${messageHtml()}${questions.map(renderDynamicQuestion).join("")}`,
+    title: "A few missing details.",
+    helper: "Answer only what matters — the brief fills itself in as you go.",
+    bodyClass: "followups-body",
+    body: `
+      ${messageHtml()}
+      <div class="followups-layout">
+        <div class="followups-questions">${questions.map(renderDynamicQuestion).join("")}</div>
+        ${renderBriefAssembler(questions)}
+      </div>
+    `,
     footer: footerHtml({
       backAction: "back-intake",
       primaryLabel: "Continue",
@@ -1258,26 +1406,168 @@ function renderFollowups() {
   };
 }
 
+// The Brief Assembler: a blueprint-style spec sheet that sits beside the missing-detail
+// questions and writes itself in, field by field, as each is answered. Each row is one
+// question; the value writes onto the sheet (see setupBrief / updateBriefValue) and the
+// progress + completion stamp track how full the brief is.
+function renderBriefAssembler(questions) {
+  const filled = questions.filter((question) => briefAnswerText(question).length).length;
+  const total = questions.length;
+  const complete = filled === total;
+  const rows = questions.map((question, index) => {
+    const value = briefAnswerText(question);
+    return `
+      <li class="brief-row ${value ? "is-filled" : ""}" data-brief-id="${esc(question.id)}">
+        <span class="brief-index">${String(index + 1).padStart(2, "0")}</span>
+        <span class="brief-field">${esc(briefFieldLabel(question))}</span>
+        <span class="brief-value" data-brief-value>${esc(value)}</span>
+        <span class="brief-tick" aria-hidden="true">&#10003;</span>
+      </li>`;
+  }).join("");
+
+  return `
+    <aside class="brief-assembler" aria-label="Project brief">
+      <div class="brief-head">
+        <span class="brief-eyebrow">Project brief</span>
+        <span class="brief-progress" data-brief-progress>${filled} / ${total}</span>
+      </div>
+      <div class="brief-rule" aria-hidden="true"><span class="brief-rule-fill" data-brief-fill style="--p:${total ? (filled / total).toFixed(3) : 0}"></span></div>
+      <ul class="brief-rows">${rows}</ul>
+      <div class="brief-foot" aria-hidden="true">
+        <span class="brief-stamp ${complete ? "is-complete" : ""}" data-brief-stamp>${complete ? "Ready" : "Drafting"}</span>
+      </div>
+    </aside>
+  `;
+}
+
+// The text a brief row shows for a question's current answer (single = the option,
+// multi = the joined options, text = the typed value). Empty until answered.
+function briefAnswerText(question) {
+  const value = state.intakeAnswers[question.id];
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value || "").trim();
+}
+
+// A short spec-sheet label for a question. The three fallback gaps get curated names;
+// anything else (incl. model-authored questions) prettifies its id, falling back to the
+// prompt when the id isn't descriptive — so the brief reads cleanly in every run.
+const BRIEF_FIELD_LABELS = {
+  productType: "Product",
+  audience: "Audience",
+  coreWorkflow: "Key workflow"
+};
+
+function briefFieldLabel(question) {
+  if (BRIEF_FIELD_LABELS[question.id]) return BRIEF_FIELD_LABELS[question.id];
+  const pretty = String(question.id || "")
+    .replace(/[-_]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim();
+  if (pretty && !/^q?\d+$/i.test(pretty)) {
+    return pretty.charAt(0).toUpperCase() + pretty.slice(1);
+  }
+  return String(question.prompt || "Detail").replace(/[?.\s]+$/, "");
+}
+
+// Rows already written into the brief, so the left→right "write-in" animation fires once
+// per field — not on every re-render (a single/multi pick re-renders the whole screen).
+const briefWritten = new Set();
+
+// Run after the followups screen mounts: animate any row that became filled since the
+// last render, and forget rows that were cleared so re-answering writes them in again.
+function setupBrief() {
+  const panel = document.querySelector(".brief-assembler");
+  if (!panel) return;
+  panel.querySelectorAll(".brief-row").forEach((row) => {
+    const id = row.dataset.briefId;
+    if (row.classList.contains("is-filled")) {
+      if (!briefWritten.has(id)) {
+        briefWritten.add(id);
+        animateBriefRow(row);
+      }
+    } else {
+      briefWritten.delete(id);
+    }
+  });
+}
+
+function animateBriefRow(row) {
+  if (prefersReducedMotion()) return;
+  row.classList.remove("is-writing");
+  void row.offsetWidth;
+  row.classList.add("is-writing");
+  row.addEventListener("animationend", () => row.classList.remove("is-writing"), { once: true });
+}
+
+// Live patch for a text answer (no full re-render on input, so focus is kept): write the
+// value onto its brief row, fire the write-in on the empty→filled edge, and refresh the
+// progress + stamp.
+function updateBriefValue(id, rawValue) {
+  const panel = document.querySelector(".brief-assembler");
+  if (!panel) return;
+  const row = [...panel.querySelectorAll(".brief-row")].find((item) => item.dataset.briefId === id);
+  if (!row) return;
+  const value = String(rawValue || "").trim();
+  const wasFilled = row.classList.contains("is-filled");
+  const valueEl = row.querySelector("[data-brief-value]");
+  if (valueEl) valueEl.textContent = value;
+  row.classList.toggle("is-filled", Boolean(value));
+  if (value && !wasFilled) {
+    briefWritten.add(id);
+    animateBriefRow(row);
+  } else if (!value) {
+    briefWritten.delete(id);
+  }
+  updateBriefProgress(panel);
+}
+
+function updateBriefProgress(panel) {
+  const rows = [...panel.querySelectorAll(".brief-row")];
+  const total = rows.length;
+  const filled = rows.filter((row) => row.classList.contains("is-filled")).length;
+  const complete = total > 0 && filled === total;
+  const progress = panel.querySelector("[data-brief-progress]");
+  if (progress) progress.textContent = `${filled} / ${total}`;
+  const fill = panel.querySelector("[data-brief-fill]");
+  if (fill) fill.style.setProperty("--p", total ? (filled / total).toFixed(3) : "0");
+  const stamp = panel.querySelector("[data-brief-stamp]");
+  if (stamp) {
+    stamp.classList.toggle("is-complete", complete);
+    stamp.textContent = complete ? "Ready" : "Drafting";
+  }
+}
+
 function renderPersonality() {
   if (state.loading) {
     return loadingDescriptor("Product personality", "personality");
   }
 
+  // The "Living Template": a generic mock site in the middle, mood chips floating
+  // around it. Selecting a mood morphs only the mock site (see applyPreviewVars), so
+  // the page chrome stays calm and the bad→better transformation reads clearly. Chips
+  // split into two flanking clouds (even index left, odd right) so any number of
+  // model-authored options lays out without overlap and collapses to a row on mobile.
+  const options = state.personalityOptions || [];
+  const left = [];
+  const right = [];
+  options.forEach((option, index) => {
+    (index % 2 === 0 ? left : right).push(moodChip(option, index));
+  });
+
   return {
+    wide: true,
+    centered: true,
     eyebrow: "Product personality",
     title: "How should it feel?",
-    helper: "Pick up to three. We tuned the first few to your product.",
+    helper: "Pick up to three. Watch the template take on your taste.",
+    bodyClass: "personality-body",
     body: `
       ${messageHtml()}
       ${limitLiveHtml()}
-      <div class="choice-grid three">
-        ${(state.personalityOptions || []).map((option) => choiceCard({
-          label: option.label,
-          description: option.description,
-          selected: state.personality.includes(option.label),
-          action: "toggle-personality",
-          value: option.label
-        })).join("")}
+      <div class="personality-stage">
+        <div class="mood-orbit is-left">${left.join("")}</div>
+        ${templatePreviewHtml()}
+        <div class="mood-orbit is-right">${right.join("")}</div>
       </div>
     `,
     footer: footerHtml({
@@ -1290,29 +1580,139 @@ function renderPersonality() {
   };
 }
 
-function renderAnti() {
-  if (state.loading) {
-    return loadingDescriptor("Product personality", "anti");
-  }
+// Horizontal jitter (px) applied per chip so the flanking columns read as a loose
+// "mood cloud" rather than two straight rails. Deterministic by index.
+const MOOD_CHIP_DX = [0, 26, 10, 34, 4, 20];
 
-  return {
-    eyebrow: "Product personality",
-    title: "And what should it never feel like?",
-    helper: "Guardrails that keep the direction honest.",
-    body: `
-      ${messageHtml()}
-      <div class="choice-grid">
-        ${(state.antiOptions || []).map((option) => choiceCard({
-          label: option.label,
-          description: option.description,
-          selected: state.avoid.includes(option.label),
-          action: "toggle-avoid",
-          value: option.label
-        })).join("")}
+function moodChip(option, index) {
+  const selected = state.personality.includes(option.label);
+  const dx = MOOD_CHIP_DX[index % MOOD_CHIP_DX.length];
+  return `
+    <button class="mood-chip ${selected ? "is-selected" : ""}" data-action="toggle-personality" data-value="${esc(option.label)}" aria-pressed="${selected}" style="--i:${index};--dx:${dx}px"${option.description ? ` title="${esc(option.description)}"` : ""}>
+      <span class="mood-chip-dot" aria-hidden="true"></span>
+      <span class="mood-chip-label">${esc(option.label)}</span>
+    </button>
+  `;
+}
+
+// The mock site the moods restyle. Pure structure (the "foundations") — only its
+// --tp-* tokens change, never its layout. Baseline values live in styles.css and
+// mirror BASELINE_PREVIEW; applyPreviewVars writes the composed tokens on mount and
+// on every toggle. data-styled drives the plain→lifted state + the corner tag.
+function templatePreviewHtml() {
+  const lines = (count) => Array.from({ length: count }, () => `<span class="tp-line"></span>`).join("");
+  const card = () => `
+    <div class="tp-card">
+      <span class="tp-ico" aria-hidden="true"></span>
+      <span class="tp-line tp-card-title"></span>
+      ${lines(2)}
+    </div>`;
+  return `
+    <div class="template-preview" data-styled="false" aria-hidden="true">
+      <span class="tp-tag">Default template</span>
+      <div class="tp-window">
+        <div class="tp-nav">
+          <span class="tp-logo"></span>
+          <nav class="tp-links"><span></span><span></span><span></span></nav>
+          <span class="tp-navbtn">Sign up</span>
+        </div>
+        <div class="tp-hero">
+          <span class="tp-eyebrow">PLATFORM</span>
+          <span class="tp-headline">Build something people remember.</span>
+          <span class="tp-sub">A solid starting point that adapts to your product's taste.</span>
+          <div class="tp-cta-row">
+            <span class="tp-cta">Get started</span>
+            <span class="tp-cta tp-ghost">Learn more</span>
+          </div>
+        </div>
+        <div class="tp-cards">${card()}${card()}${card()}</div>
+        <div class="tp-foot"><span></span><span></span><span></span></div>
       </div>
-    `,
-    footer: footerHtml({ backAction: "back-personality", primaryLabel: "Continue", primaryAction: "go-references" })
-  };
+    </div>
+  `;
+}
+
+// Token name -> the --tp-* custom property it drives on the preview element.
+const TP_TOKEN_TO_VAR = {
+  accent: "--tp-accent",
+  accentSoft: "--tp-accent-soft",
+  accentInk: "--tp-accent-ink",
+  canvas: "--tp-canvas",
+  surface: "--tp-surface",
+  ink: "--tp-ink",
+  inkSoft: "--tp-ink-soft",
+  border: "--tp-border",
+  radius: "--tp-radius",
+  density: "--tp-density",
+  scale: "--tp-scale",
+  weight: "--tp-weight",
+  tracking: "--tp-tracking",
+  font: "--tp-font",
+  shadow: "--tp-shadow"
+};
+
+// Write the composed preview tokens onto the mock site so CSS transitions carry the
+// morph. Called fresh on mount (no transition — element just appeared) and on every
+// personality toggle (animates from the previous selection's tokens).
+function applyPreviewVars() {
+  const preview = document.querySelector(".template-preview");
+  if (!preview) return;
+  const tokens = composePreview(state.personality);
+  for (const [token, cssVar] of Object.entries(TP_TOKEN_TO_VAR)) {
+    if (tokens[token] != null) {
+      preview.style.setProperty(cssVar, String(tokens[token]));
+    }
+  }
+  const styled = state.personality.length > 0;
+  preview.dataset.styled = styled ? "true" : "false";
+  const tag = preview.querySelector(".tp-tag");
+  if (tag) tag.textContent = styled ? "Refined" : "Default template";
+}
+
+// Toggle a mood without re-rendering the screen, so the template morph is a smooth
+// CSS-var crossfade and the floating chips don't re-mount mid-animation. Mirrors the
+// 3-pick limit behaviour of toggleLimited, then live-patches chips, preview, counter,
+// and the Continue button in place (same pattern as updateBriefValue on followups).
+function togglePersonality(value) {
+  const list = state.personality;
+  const index = list.indexOf(value);
+  if (index >= 0) {
+    list.splice(index, 1);
+  } else if (list.length < 3) {
+    list.push(value);
+  } else {
+    flashPersonalityLimit();
+    return;
+  }
+  syncPersonalityUI();
+}
+
+function syncPersonalityUI() {
+  const stage = document.querySelector(".personality-stage");
+  if (!stage) return;
+  stage.querySelectorAll(".mood-chip").forEach((chip) => {
+    const on = state.personality.includes(chip.dataset.value);
+    chip.classList.toggle("is-selected", on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+  applyPreviewVars();
+  const counter = document.querySelector("#footer .counter-chip");
+  if (counter) counter.textContent = `${state.personality.length} / 3`;
+  const primary = document.querySelector('#footer [data-action="submit-personality"]');
+  if (primary) primary.disabled = state.personality.length === 0;
+}
+
+function flashPersonalityLimit() {
+  const stage = document.querySelector(".personality-stage");
+  const chip = document.querySelector("#footer .counter-chip");
+  const live = document.querySelector("#limit-live");
+  if (chip) chip.classList.add("pulse");
+  if (stage) stage.classList.add("at-limit");
+  if (live) live.textContent = "Maximum of 3 selected.";
+  setTimeout(() => {
+    chip?.classList.remove("pulse");
+    stage?.classList.remove("at-limit");
+  }, 260);
 }
 
 function renderReferences() {
@@ -1334,7 +1734,7 @@ function renderReferences() {
       <div class="reference-grid">${filteredReferences().map(renderReferenceCard).join("")}</div>
     `,
     footer: footerHtml({
-      backAction: "back-anti",
+      backAction: "back-personality",
       primaryLabel: "Continue",
       primaryAction: "submit-references",
       primaryDisabled: state.references.length === 0,
@@ -1355,23 +1755,7 @@ function renderReferenceTaste() {
     helper: "Pick the parts worth keeping.",
     wide: true,
     body: `${messageHtml()}<div class="summary-list">${selected.map(renderReferenceTasteBlock).join("")}</div>`,
-    footer: footerHtml({ wide: true, backAction: "back-references", primaryLabel: "Continue", primaryAction: "go-extra" })
-  };
-}
-
-function renderExtra() {
-  return {
-    eyebrow: "Taste clarification",
-    title: "Anything to add?",
-    helper: "Constraints, taste notes, competitors — optional.",
-    body: `
-      ${messageHtml()}
-      <div class="field">
-        <label class="label" for="extra">Extra notes</label>
-        <textarea id="extra" class="textarea" data-bind="extra" placeholder="Make it feel more like a serious product tool than a marketing site. Avoid huge hero sections.">${esc(state.extra)}</textarea>
-      </div>
-    `,
-    footer: footerHtml({ backAction: "back-reference-taste", primaryLabel: "Generate directions", primaryAction: "submit-extra" })
+    footer: footerHtml({ wide: true, backAction: "back-references", primaryLabel: "Generate directions", primaryAction: "submit-reference-taste" })
   };
 }
 
@@ -1417,37 +1801,12 @@ function renderDirections() {
     `,
     footer: footerHtml({
       wide: true,
-      backAction: "back-extra",
+      backAction: "back-reference-taste",
       primaryLabel: "Continue",
       primaryAction: "submit-directions",
       primaryDisabled: state.selectedDirections.length === 0,
       side: state.selectedDirections.length > 1 ? "Last pick sets the theme" : ""
     })
-  };
-}
-
-function renderOptional() {
-  if (state.loading) {
-    return loadingDescriptor("Optional additions", "optional");
-  }
-
-  return {
-    eyebrow: "Optional additions",
-    title: "Any final tuning?",
-    helper: "Optional nudges before the reveal.",
-    body: `
-      ${messageHtml()}
-      <div class="choice-grid">
-        ${(state.optionalOptions || []).map((option) => choiceCard({
-          label: option.label,
-          description: option.description,
-          selected: state.optionalAdditions.includes(option.label),
-          action: "toggle-optional",
-          value: option.label
-        })).join("")}
-      </div>
-    `,
-    footer: footerHtml({ backAction: "back-directions", primaryLabel: "Preview plan", primaryAction: "submit-optional" })
   };
 }
 
@@ -1489,7 +1848,7 @@ function renderPreview() {
         <pre class="code-preview">${esc(previewPlanMarkdown(plan))}</pre>
       </div>
     `,
-    footer: footerHtml({ wide: true, backAction: "back-optional", primaryLabel: "Generate files", primaryAction: "generate-final" })
+    footer: footerHtml({ wide: true, backAction: "back-directions", primaryLabel: "Generate files", primaryAction: "generate-final" })
   };
 }
 
@@ -1548,10 +1907,8 @@ function renderFinal() {
 const LOADING_TITLES = {
   followups: "Reading your project.",
   personality: "Shaping the taste options.",
-  anti: "Setting the guardrails.",
   referenceTaste: "Reading your references.",
   directions: "Composing three directions.",
-  optional: "Preparing the final tuning.",
   preview: "Building your preview.",
   final: "Generating your files."
 };
@@ -1973,6 +2330,9 @@ function onInput(event) {
     state[element.dataset.bind] = element.value;
     if (element.dataset.bind === "referenceSearch") {
       updateReferenceGrid();
+    } else if (element.dataset.bind === "intake") {
+      updatePrimaryDisabled();
+      updateIntakeWords(element.value);
     } else {
       updatePrimaryDisabled();
     }
@@ -1980,6 +2340,7 @@ function onInput(event) {
   }
   if (element.dataset.answerText) {
     state.intakeAnswers[element.dataset.answerText] = element.value;
+    updateBriefValue(element.dataset.answerText, element.value);
     return;
   }
   if (element.dataset.referenceNote) {
@@ -2003,6 +2364,18 @@ function onInput(event) {
 
 function onChange(event) {
   const element = event.target;
+  if (element.id === "intakeFileInput") {
+    // Attachments are a front-of-house affordance: we keep the file names as removable
+    // chips. (Reading/sending file contents isn't wired into the interview yet.)
+    const names = new Set((state.intakeFiles || []).map((file) => file.name));
+    const added = Array.from(element.files || [])
+      .map((file) => ({ name: file.name, size: file.size }))
+      .filter((file) => !names.has(file.name));
+    state.intakeFiles = [...(state.intakeFiles || []), ...added];
+    element.value = "";
+    renderIntakeFileChips();
+    return;
+  }
   if (element.dataset.bindModel) {
     const role = element.dataset.bindModel;
     state.models[role] = modelWithDefaults(state.availableModels.find((model) => model.id === element.value));
@@ -2075,6 +2448,13 @@ async function handleAction(action, value) {
         return go("intake");
       case "submit-intake":
         return submitIntake();
+      case "intake-add":
+        document.getElementById("intakeFileInput")?.click();
+        return;
+      case "remove-intake-file":
+        state.intakeFiles = (state.intakeFiles || []).filter((file) => file.name !== value);
+        renderIntakeFileChips();
+        return;
       case "answer-single":
         return answerSingle(value);
       case "answer-multi":
@@ -2085,19 +2465,12 @@ async function handleAction(action, value) {
       case "back-followups":
         return state.followupQuestions.length ? go("followups") : go("intake");
       case "toggle-personality":
-        return toggleLimited(state.personality, value, 3);
+        return togglePersonality(value);
       case "submit-personality":
         appendPrimaryContext("Selected personality", state.personality.join(", "));
-        return loadAntiVibe();
+        return go("references");
       case "back-personality":
         return go("personality");
-      case "toggle-avoid":
-        return toggleValue(state.avoid, value);
-      case "go-references":
-        appendPrimaryContext("Avoid", state.avoid.join(", "));
-        return go("references");
-      case "back-anti":
-        return go("anti");
       case "set-reference-group":
         state.referenceGroup = value;
         return refresh();
@@ -2110,14 +2483,11 @@ async function handleAction(action, value) {
         return go("references");
       case "toggle-reference-like":
         return toggleReferenceLike(value);
-      case "go-extra":
+      case "submit-reference-taste":
         appendPrimaryContext("Reference likes", JSON.stringify(state.referenceLikes, null, 2));
-        return go("extra");
+        return loadDirections();
       case "back-reference-taste":
         return go("referenceTaste");
-      case "submit-extra":
-        appendPrimaryContext("Extra notes", state.extra || "None");
-        return loadDirections();
       case "toggle-direction":
         return toggleDirection(value);
       case "regenerate-directions":
@@ -2135,18 +2505,9 @@ async function handleAction(action, value) {
           selectedDirections: state.selectedDirections,
           comments: state.directionComments
         }, null, 2));
-        return loadOptional();
-      case "back-extra":
-        return go("extra");
-      case "toggle-optional":
-        return toggleValue(state.optionalAdditions, value);
-      case "submit-optional":
-        appendPrimaryContext("Optional additions", state.optionalAdditions.join(", "));
         return loadPlan();
       case "back-directions":
         return go("directions");
-      case "back-optional":
-        return go("optional");
       case "generate-final":
         return generateFinal();
       case "back-preview":
@@ -2173,6 +2534,9 @@ async function submitIntake() {
 
   state.step = "followups";
   state.loading = "followups";
+  // Fresh brief: nothing has been written into the new sheet yet, so each answered row
+  // gets its one-time write-in animation.
+  briefWritten.clear();
   paint({ transition: true });
   const result = await postJson("/api/onboarding/intake", { state: compactState() });
   state.loading = "";
@@ -2192,17 +2556,6 @@ async function loadPersonality() {
   state.loading = "";
   applyModelResult(result, "Product personality");
   state.personalityOptions = result.options || [];
-  paint({ transition: true });
-}
-
-async function loadAntiVibe() {
-  state.step = "anti";
-  state.loading = "anti";
-  paint({ transition: true });
-  const result = await postJson("/api/onboarding/anti-vibe", { state: compactState() });
-  state.loading = "";
-  applyModelResult(result, "Anti-vibe");
-  state.antiOptions = result.options || [];
   paint({ transition: true });
 }
 
@@ -2228,17 +2581,6 @@ async function loadDirections() {
   state.loading = "";
   applyModelResult(result, "Design directions");
   state.directions = result.directions || [];
-  paint({ transition: true });
-}
-
-async function loadOptional() {
-  state.step = "optional";
-  state.loading = "optional";
-  paint({ transition: true });
-  const result = await postJson("/api/onboarding/optional-additions", { state: compactState() });
-  state.loading = "";
-  applyModelResult(result, "Optional additions");
-  state.optionalOptions = result.options || [];
   paint({ transition: true });
 }
 

@@ -74,11 +74,13 @@ export const MODEL_EFFECT_CONFIG = {
     cursorBallSize: 2.15,
     enableMouseInteraction: true,
     enableTransparency: true,
-    // Cursor ball eases toward the pointer every frame (like the reference MetaBalls) for a
-    // smooth trailing follow rather than a snap. fpsCap 60 draws each refresh on a 60Hz
-    // display, so the motion stays fluid instead of juddering at a misaligned 30fps cap.
-    hoverSmoothness: 0.22,
-    idleSmoothness: 0.06,
+    // Frame-rate-INDEPENDENT cursor chase (`1 - e^(-rate·dt)`), same as gemini/codex. The
+    // old fixed per-frame factor (`*= smoothness`) was tied to the frame count, so any dip
+    // below 60fps stretched the follow and read as lag; this keeps a constant time-constant
+    // no matter the cadence. hoverFollowRate is tuned high for a tight, snappy track with
+    // just a hair of smoothing; idleFollowRate drifts gently. No added per-frame cost.
+    hoverFollowRate: 26,
+    idleFollowRate: 4,
     idleDriftRadiusRatio: 0.08,
     speed: 0.18,
     spreadX: 1.08,
@@ -1125,9 +1127,9 @@ class MetaballsEffect extends CanvasEffect {
   draw(dt, now, still) {
     if (!still) this.time += dt;
     if (this.gl && this.program) {
-      this._drawWebgl();
+      this._drawWebgl(dt);
     } else {
-      this._drawFallback(still);
+      this._drawFallback(dt, still);
     }
   }
 
@@ -1137,7 +1139,7 @@ class MetaballsEffect extends CanvasEffect {
 
   // Writes the current ball positions straight into the reused Float32Array and updates
   // the cursor ball in place — no per-frame allocations, so the loop produces no GC churn.
-  _advance(worldWidth, worldHeight) {
+  _advance(worldWidth, worldHeight, dt) {
     const cfg = this.config;
     const speed = cfg.speed;
     const balls = this.balls;
@@ -1157,28 +1159,31 @@ class MetaballsEffect extends CanvasEffect {
     const cursor = this.cursorWorld;
     let targetX;
     let targetY;
-    let smoothness;
+    let rate;
     if (cfg.enableMouseInteraction && this.pointerInside) {
-      // Ease toward the pointer each frame — smooth trailing follow, like the reference.
+      // Chase the pointer — a tight, snappy follow with a hair of smoothing.
       targetX = (this.pointer.x - 0.5) * worldWidth;
       targetY = (0.5 - this.pointer.y) * worldHeight;
-      smoothness = cfg.hoverSmoothness ?? 0.22;
+      rate = cfg.hoverFollowRate ?? 26;
     } else {
       // No pointer: drift on a slow orbit, eased more gently.
       const drift = cfg.idleDriftRadiusRatio || 0.08;
       targetX = Math.cos(this.time * speed * 0.9) * worldWidth * drift;
       targetY = Math.sin(this.time * speed * 0.7) * worldHeight * drift;
-      smoothness = cfg.idleSmoothness || 0.08;
+      rate = cfg.idleFollowRate ?? 4;
     }
-    cursor.x += (targetX - cursor.x) * smoothness;
-    cursor.y += (targetY - cursor.y) * smoothness;
+    // Frame-rate-independent ease: the fraction covered this frame depends on real elapsed
+    // time, so the follow feels identical whether we're at 60fps or dropping frames.
+    const k = 1 - Math.exp(-rate * Math.max(dt, 0));
+    cursor.x += (targetX - cursor.x) * k;
+    cursor.y += (targetY - cursor.y) * k;
   }
 
-  _drawWebgl() {
+  _drawWebgl(dt) {
     const gl = this.gl;
     const worldHeight = this.config.animationSize;
     const worldWidth = this._worldWidth(worldHeight);
-    this._advance(worldWidth, worldHeight);
+    this._advance(worldWidth, worldHeight, dt);
 
     // Program, vertex attribute, resolution and every static uniform were bound once in
     // setup()/onResize(); only the two dynamic uniforms change here.
@@ -1188,7 +1193,7 @@ class MetaballsEffect extends CanvasEffect {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  _drawFallback() {
+  _drawFallback(dt) {
     if (!this.ctx) return;
     this.clear();
     const ctx = this.ctx;
@@ -1196,7 +1201,7 @@ class MetaballsEffect extends CanvasEffect {
     const h = this.height;
     const worldHeight = this.config.animationSize;
     const worldWidth = this._worldWidth(worldHeight);
-    this._advance(worldWidth, worldHeight);
+    this._advance(worldWidth, worldHeight, dt);
     const arr = this.ballUniforms;
 
     ctx.save();
@@ -1317,7 +1322,11 @@ export function syncModelEffects(container, { primary, secondary, merged }) {
   if (!container) return;
   token += 1;
   mountSide(container, "primary", primary, Boolean(merged), false);
-  if (merged) clearSide("secondary", true);
+  // Retire (don't hard-destroy) the secondary on merge: it keeps drawing while its stage
+  // fades, so its field cross-covers with the primary's newly-merged one. Since both sides
+  // share the same seed/phase, that overlap is a seamless reveal — destroying it instantly
+  // instead left a light flash before the merged field faded in.
+  if (merged) clearSide("secondary", false);
   else mountSide(container, "secondary", secondary, false, false);
 }
 
@@ -1328,7 +1337,9 @@ export function syncModelEffectsDeferred(container, { primary, secondary, merged
   afterPaint(() => {
     if (runToken !== token) return;
     mountSide(container, "primary", primary, Boolean(merged), false);
-    if (merged) clearSide("secondary", true);
+    // Retire (not hard-destroy) on merge so the secondary's field fades out and cross-covers
+    // the primary's expanding merged field — see syncModelEffects(); avoids the light flash.
+    if (merged) clearSide("secondary", false);
     else mountSide(container, "secondary", secondary, false, false);
   });
 }
